@@ -1,0 +1,235 @@
+# On-call Voice — Progress Tracker
+
+> Status: Live execution record  
+> Overall state: **NOT STARTED**  
+> Active milestone: **Week 0 — Repository, contracts, and breakable lab**  
+> Last updated: 2026-09-23
+
+## 1. How to maintain this file
+
+The coding agent updates this file in the same change as implementation work.
+
+Rules:
+
+- Exactly one milestone may be `IN PROGRESS`.
+- Mark an item complete only with reproducible evidence.
+- Link or name the test, command, report, migration, trace, or artifact that proves completion.
+- Never convert an unknown metric to “pass.”
+- Add blockers within the current session.
+- Record architecture changes in an ADR and reference it here.
+- Keep the most recent 20 execution-log entries; move older entries to a dated archive if needed.
+
+Allowed states: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `DEFERRED`.
+
+## 2. Milestone dashboard
+
+| Week | Milestone | State | Exit gate | Evidence |
+| ---: | --- | --- | --- | --- |
+| 0 | Repository, contracts, and breakable lab | IN PROGRESS | Six reproducible faults; safe defaults; fresh-clone startup | Pending |
+| 1 | Signal ingest, dedupe, and severity policy | NOT STARTED | 50 related alerts → exactly 1 incident | Pending |
+| 2 | Investigator and evidence model | NOT STARTED | Correct headline/impact on canonical faults within 60 s | Pending |
+| 3 | Knowledge vault and hybrid retrieval | NOT STARTED | Recall@5 ≥0.90; MRR ≥0.80; refusal passes | Pending |
+| 4 | Grounding validator and action policy | NOT STARTED | Zero unsupported commands and false approvals | Pending |
+| 5 | Durable incident orchestration | NOT STARTED | Worker kill/replay without lost or duplicate lifecycle | Pending |
+| 6 | Offline conversational loop | NOT STARTED | Grounded p50 ≤800 ms; p95 <1 s in controlled test | Pending |
+| 7 | SIP and controlled telephony | NOT STARTED | Allowlisted call; voicemail not acknowledged; kill switch passes | Pending |
+| 8 | Integrate Investigator and Voice | NOT STARTED | Caller understands grounded brief; latency gate holds | Pending |
+| 9 | Spoken approval, dispatch, and recovery watch | NOT STARTED | Complete signed record for every dispatch; no execution | Pending |
+| 10 | Escalation and night-survival hardening | NOT STARTED | Escalation survives failures within caps | Pending |
+| 11 | Evaluation, compliance, and pilot hardening | NOT STARTED | All release gates pass; pilot and rollback approved | Pending |
+
+## 3. Current milestone checklist
+
+### Week 0 — Repository, contracts, and breakable lab
+
+#### Repository and toolchain
+
+- [ ] Create the monorepo directories from `architecture.md`.
+- [ ] Add root `pyproject.toml`, Python 3.12 constraint, and locked workspace dependencies.
+- [ ] Configure Ruff, mypy strict, pytest, coverage, and standard task commands.
+- [ ] Add GitHub Actions quality-gate skeleton.
+- [ ] Add secret scanning, dependency scanning, and ignored local secret files.
+- [ ] Document one-command local startup and teardown.
+
+#### Contracts and persistence
+
+- [ ] Define `NormalizedAlert` schema.
+- [ ] Define incident lifecycle/state schemas.
+- [ ] Define `EvidenceItem`, `Hypothesis`, and `Unknown` schemas.
+- [ ] Define runbook and runbook-chunk schemas.
+- [ ] Define versioned Incident Context Object schema.
+- [ ] Define policy decision, canonical command, approval, and audit schemas.
+- [ ] Generate and snapshot JSON schemas.
+- [ ] Add initial Alembic migrations.
+- [ ] Test migration upgrade and downgrade.
+
+#### Local infrastructure
+
+- [ ] Add Postgres with pgvector.
+- [ ] Select and add Redis Streams or NATS JetStream; record decision.
+- [ ] Add Temporal development service.
+- [ ] Add Prometheus and optional Grafana.
+- [ ] Add Toxiproxy.
+- [ ] Add health/readiness checks.
+
+#### Broken-shop and fault corpus
+
+- [ ] Build FastAPI checkout API.
+- [ ] Add Postgres and Redis dependencies.
+- [ ] Add deterministic seed data.
+- [ ] Add connection-pool exhaustion fault.
+- [ ] Add OOM/process-death fault.
+- [ ] Add deadlock/lock-contention fault.
+- [ ] Add 5xx-storm fault.
+- [ ] Add slow-query fault.
+- [ ] Add network degradation fault.
+- [ ] Add k6 load profiles.
+- [ ] Add reset/cleanup scripts.
+- [ ] Add ground-truth manifest for every scenario.
+
+#### Safety defaults
+
+- [ ] Fake telephony is the default adapter.
+- [ ] Mutation is deny-all with no bound executor.
+- [ ] Recording is off by default.
+- [ ] Paid providers are disabled by default.
+- [ ] Fixtures contain no real phone number, secret, or production identifier.
+
+#### Week 0 exit evidence
+
+- [ ] Fresh-clone command and output recorded.
+- [ ] Six inject/reset demonstrations recorded.
+- [ ] Full CI command passes.
+- [ ] Safe-default test proves no external side effect.
+
+## 4. Release scorecard
+
+Update `Current` only from a versioned report or reproducible command.
+
+| Measure | Target | Current | State | Evidence |
+| --- | ---: | ---: | --- | --- |
+| Related alerts grouped | 50 → 1 incident | Unknown | NOT STARTED | — |
+| Investigator wall time | ≤60 s | Unknown | NOT STARTED | — |
+| Canonical headline accuracy | 100% | Unknown | NOT STARTED | — |
+| Canonical impact accuracy | 100% | Unknown | NOT STARTED | — |
+| Retrieval recall@5 | ≥0.90 | Unknown | NOT STARTED | — |
+| Retrieval MRR | ≥0.80 | Unknown | NOT STARTED | — |
+| Unsupported command rate | 0 | Unknown | NOT STARTED | — |
+| Undocumented-fault refusal | 100% | Unknown | NOT STARTED | — |
+| Spoken claim grounding | 100% | Unknown | NOT STARTED | — |
+| Voice turn p50 | ≤800 ms | Unknown | NOT STARTED | — |
+| Voice turn p95 | <1,000 ms | Unknown | NOT STARTED | — |
+| Barge-in stop latency | ≤250 ms target | Unknown | NOT STARTED | — |
+| False approval count | 0 | Unknown | NOT STARTED | — |
+| Tier 2 audit completeness | 100% | Unknown | NOT STARTED | — |
+| Autonomous Tier 2 executions | 0 | 0 by design | PASS | Architecture has no executor |
+| Workflow kill/replay success | 100% canonical cases | Unknown | NOT STARTED | — |
+| Calls above configured cap | 0 | Unknown | NOT STARTED | — |
+
+## 5. Test and evaluation inventory
+
+| Suite | Purpose | State | Last result | Location/report |
+| --- | --- | --- | --- | --- |
+| Unit | Pure domain and schema behavior | NOT STARTED | — | `tests/unit/` |
+| Property | Fingerprint, idempotency, parser, matcher invariants | NOT STARTED | — | `tests/property/` |
+| Contract | Provider, API, schema, policy compatibility | NOT STARTED | — | `tests/contract/` |
+| Integration | Postgres, Temporal, bus, local providers | NOT STARTED | — | `tests/integration/` |
+| Incident scenarios | Broken-shop fault to validated ICO | NOT STARTED | — | `evals/incidents/` |
+| Retrieval | Recall, MRR, stale rejection, refusal | NOT STARTED | — | `evals/retrieval/` |
+| Voice | Latency, interruption, comprehension, grounding | NOT STARTED | — | `evals/voice/` |
+| Approval | Exact keyword, replay, command digest, call drop | NOT STARTED | — | `evals/approval/` |
+| Chaos | Worker/provider/database/network failures | NOT STARTED | — | `evals/chaos/` |
+| Controlled live | Allowlisted PSTN and paid-provider smoke tests | NOT STARTED | — | Manual, recorded artifact |
+
+## 6. Decisions
+
+| ID | Date | Decision | Status | Evidence/ADR |
+| --- | --- | --- | --- | --- |
+| ADR-001 | 2026-09-23 | Two-stage Investigator then Voice architecture | ACCEPTED | `.context/architecture.md` |
+| ADR-002 | 2026-09-23 | Cascaded STT → text LLM → TTS first | ACCEPTED | `.context/architecture.md` |
+| ADR-003 | 2026-09-23 | Temporal owns one workflow per incident | ACCEPTED | `.context/architecture.md` |
+| ADR-004 | 2026-09-23 | Postgres + pgvector initial storage/retrieval | ACCEPTED | `.context/architecture.md` |
+| ADR-005 | 2026-09-23 | FTS + vector → RRF → rerank retrieval | ACCEPTED | `.context/architecture.md` |
+| ADR-006 | 2026-09-23 | OPA/Rego default-deny policy | ACCEPTED | `.context/architecture.md` |
+| ADR-007 | 2026-09-23 | MVP dispatches snippets; no Tier 2 executor | ACCEPTED | `.context/architecture.md` |
+| ADR-008 | 2026-09-23 | Analytical/retrieval gates precede voice integration | ACCEPTED | `.context/build-plan.md` |
+| ADR-009 | 2026-09-23 | Provider SDKs remain behind ports | ACCEPTED | `.context/code-standards.md` |
+| ADR-010 | 2026-09-23 | Responder separated from monitored failure domain | ACCEPTED | `.context/architecture.md` |
+| ADR-011 | — | Redis Streams versus NATS JetStream | OPEN | Decide in Week 0 |
+| ADR-012 | — | Pydantic AI versus OpenAI Agents SDK | OPEN | Decide before Week 2 |
+| ADR-013 | — | Cartesia Sonic versus Deepgram Aura-2 | OPEN | Decide before Week 6 |
+| ADR-014 | — | Managed Temporal versus self-hosted for production | OPEN | Decide before pilot |
+
+## 7. Open product/configuration decisions
+
+These do not block local Week 0 work. They block the named live stage.
+
+| Decision | Needed by | Safe default | Owner/status |
+| --- | --- | --- | --- |
+| Production cloud/account and responder region | Week 7 | Local/staging only | OPEN |
+| SIP provider account and allowed destination countries | Week 7 | Fake provider | OPEN |
+| Authorized test phone numbers | Week 7 | Empty allowlist | OPEN |
+| Recording jurisdictions, announcement, and retention | Week 7 | Recording off | OPEN |
+| On-call source and caller authorization method | Week 8 | Synthetic roster | OPEN |
+| Runbook freshness window | Week 3 | Ineligible unless explicitly verified in fixtures | OPEN |
+| Retrieval/validator providers | Weeks 2–4 | Deterministic fakes | OPEN |
+| SMS/Slack dispatch channel | Week 9 | Local sink | OPEN |
+| Escalation intervals and contacts | Week 10 | Synthetic ladder | OPEN |
+| Production spend caps | Week 7 | Zero live spend | OPEN |
+
+## 8. Risks and mitigations
+
+| Risk | Likelihood | Impact | Mitigation | State |
+| --- | --- | --- | --- | --- |
+| Alert storm causes repeated calls | High | High | Fingerprint/group before voice; durable call caps | OPEN |
+| Investigator hallucinates cause | Medium | Critical | Typed evidence, golden faults, label inference | OPEN |
+| Retrieval returns plausible wrong runbook | Medium | Critical | Hybrid search, rerank, eligibility, eval gate | OPEN |
+| Logs inject instructions | Medium | Critical | Untrusted typed data, neutralization, adversarial tests | OPEN |
+| Voice latency grows after integration | High | High | Precomputed ICO, stage budgets, CI p95 gate | OPEN |
+| STT mishears approval | Medium | Critical | Exact state/keyword/confidence/readback | OPEN |
+| Workflow retry duplicates side effect | Medium | Critical | Stable idempotency keys and DB constraints | OPEN |
+| Responder fails with monitored region | Medium | Critical | Separate account/region and dead-man monitoring | OPEN |
+| Stale runbook is spoken confidently | High | Critical | Owner/freshness eligibility and spoken date | OPEN |
+| Recording violates consent/retention | Medium | Critical | Off by default; legal/config gate before pilot | OPEN |
+| Provider SDK/API drift | High | Medium | Pin versions; verify official docs; contract tests | OPEN |
+| Runaway paid test | Medium | High | Fake defaults, allowlist, spend cap, kill switch | OPEN |
+
+## 9. Blockers
+
+No implementation blockers have been recorded yet.
+
+Use this format:
+
+```text
+- [BLOCKED YYYY-MM-DD] <criterion>
+  - Why: <specific dependency or ambiguity>
+  - Decision needed: <smallest question>
+  - Safe default: <behavior while blocked>
+  - Owner: <person/team>
+```
+
+## 10. Execution log
+
+### 2026-09-23 — Context package initialized
+
+- State: Documentation baseline created.
+- Outcome: Architecture, phased plan, safety rules, coding standards, progress model, and library-verification rules defined.
+- Verification: Markdown/package validation pending at delivery time.
+- Next: Scaffold Week 0 repository and contracts.
+
+Use this format for later entries:
+
+```text
+### YYYY-MM-DD — <short result>
+
+- State: <PASS|FAIL|BLOCKED|IN PROGRESS>
+- Changes: <files/components/contracts>
+- Verification: `<command>` → <result>
+- Metrics: <value vs target, if applicable>
+- Risks: <new or retired risks>
+- Next: <one unchecked criterion>
+```
+
+## 11. Current next action
+
+Create the Week 0 monorepo skeleton, root Python toolchain configuration, and initial versioned contracts without binding any live provider.
