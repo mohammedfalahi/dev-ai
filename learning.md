@@ -168,3 +168,50 @@
 - **Failure Modes Prevented**:
   - **Vocabulary Mismatch Escapes**: Prevents critical runbooks (like Doc 2) from being completely missed by BM25 when the query uses synonyms (like "postgres") not found in the runbook content.
   - **Diluted Critical Technical Identifiers**: Prevents dense embeddings from diluting highly specific identifiers (like hex `0x80004005` in Doc 4) under deep vector averaging, ensuring that the correct exact-match runbook remains at the absolute top of the incident brief list.
+
+---
+
+## [2026-09-24] Milestone 6: Datastore Infrastructure & Hybrid Schema Initialization (Track 2)
+
+### 1. What was built & which files were modified
+- Initialized PostgreSQL 16 container with `pgvector` extension via Docker Compose (`docker-compose.yml`).
+- Added `psycopg` database driver to project dependencies via `uv`.
+- Authored initial SQL schema migration `infra/migrations/001_init_schema.sql` covering:
+  - `vector` extension enablement (`CREATE EXTENSION IF NOT EXISTS vector`).
+  - Core relational and incident management tables: `incidents`, `alerts`, `runbooks`, `approvals`, `audit_log`.
+  - Dual representation for runbook search in `runbook_chunks`: `embedding vector(768)` for dense semantic vector search alongside `fts tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED` for sparse lexical retrieval.
+  - Search indexes: Generalized Inverted Index (GIN) on `fts` and Hierarchical Navigable Small World (HNSW) index on `embedding` using cosine distance ops (`vector_cosine_ops`).
+- Created and executed automated database migration and schema verification runner `infra/run_migrations.py`.
+- Files modified/created:
+  - `docker-compose.yml` (Created)
+  - `infra/migrations/001_init_schema.sql` (Created)
+  - `infra/run_migrations.py` (Created)
+  - `pyproject.toml` & `uv.lock` (Modified with `psycopg[binary]`)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Concept: Dual Representation Strategy in a Single Datastore**:
+  - Rather than provisioning and synchronizing two disconnected clusters (e.g., Elasticsearch for text and Pinecone for embeddings), we maintain a **unified dual representation** within a single PostgreSQL table (`runbook_chunks`).
+  - **Dense Channel (`embedding vector(768)`)**: Captures high-dimensional conceptual relationships, synonyms, and generalized troubleshooting intent generated via `gemini-embedding-001` with MRL dimensionality reduction.
+  - **Sparse Channel (`fts tsvector GENERATED ALWAYS AS (to_tsvector('english', content)) STORED`)**: Captures exact technical lexemes, error strings, flags, and system codes using PostgreSQL's native document tokenization, dictionary normalization, and stemmer. By defining it as a `GENERATED ALWAYS ... STORED` column, PostgreSQL guarantees write-time consistency: the `tsvector` is deterministically computed and persisted upon every insert or update, completely eliminating cache/state drift between raw text and searchable tokens.
+- **Math/Logic: GIN vs. HNSW Indexing Mechanics**:
+  - **GIN (Generalized Inverted Index) for Sparse FTS**: Inverts the relation from document $\to$ words into word $\to$ posting list of document pointers. Searching for a term runs in $O(\log N)$ tree traversal to locate the term dictionary entry, followed by set intersections across posting lists for multi-term queries.
+  - **HNSW (Hierarchical Navigable Small World) for Dense Vector Search**: Builds a multi-layer graph where lower layers have high vertex density (local clustering) and upper layers have long-range skip edges. Nearest neighbor search starts at the top sparse layer with greedy routing and descends layer by layer, achieving logarithmic search complexity ($O(\log N)$) without needing to exhaustively evaluate $O(N)$ high-dimensional floating-point vector distances.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *What is the indexing and memory overhead of pgvector HNSW compared to IVFFlat, and why did we choose HNSW for our incident investigation hot-path?*
+     - **Answer**:
+       - **IVFFlat (Inverted File Flat)** partitions vector space into Voronoi cells via k-means clustering. It requires an initial training step, has low build memory, and smaller disk footprint, but query recall drops significantly under real-time inserts unless lists are frequently rebuilt. Furthermore, achieving high recall requires probing many lists (`ivfflat.probes`), which causes erratic query latencies under load.
+       - **HNSW** maintains a multi-layer proximity graph with parameters `m` (maximum connections per node) and `ef_construction` (dynamic candidate list size during construction). It uses more RAM (roughly $1.5\times$ to $2\times$ raw vector size to store graph edges and pointers) and has higher build times. However, HNSW requires **no training phase**, supports seamless real-time incremental inserts without degradation, and delivers ultra-fast, deterministic sub-10ms query latencies with $>95\%$ recall. For safety-critical incident response where an on-call engineer needs immediate runbook context on a voice call, deterministic retrieval latency completely outweighs the additional memory overhead.
+  2. *How does the dual representation (vector(768) + generated tsvector) impact write amplification, disk storage efficiency, and vacuum performance compared to an external vector database?*
+     - **Answer**:
+       - Storing both `vector(768)` (approx. 3 KB per chunk for 768 32-bit floats) and `tsvector` alongside text increases row width and WAL write amplification during chunk ingestion.
+       - However, this cost is vastly overshadowed by operational simplicity and transaction guarantees. With an external vector DB (e.g. Pinecone/Qdrant), keeping relational runbook metadata, access policies, and vectors in sync requires distributed dual-writes, outbox patterns, or CDC pipelines that risk silent desynchronization or orphaned embeddings.
+       - In PostgreSQL with `pgvector`, transactions are ACID-compliant: a runbook chunk insert, its full-text generated vector, its dense vector, and its relational metadata commit or rollback together. For storage efficiency, pairing Matryoshka dimensionality reduction (truncating from 3072 to 768 dimensions) already saves 75% of raw vector footprint, more than offsetting the incremental cost of the `tsvector` column and GIN index.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We chose unified PostgreSQL 16 with `pgvector` rather than splitting our stack across dedicated search engines (OpenSearch) and vector databases. This single-engine architecture eliminates network hops between disparate datastores, enables atomic transactions, simplifies local testing via Docker Compose, and allows running hybrid RRF queries directly in SQL.
+- **Failure Modes Prevented**:
+  - **Split-Brain State & Orphaned Chunks**: Eliminates the catastrophic failure mode where an updated or deleted runbook in the primary database remains active in an external vector index, preventing out-of-date or dangerous operational procedures from being served during live incidents.
+  - **Text-to-FTS Cache Desynchronization**: Utilizing a PostgreSQL `GENERATED ALWAYS ... STORED` column guarantees that the lexical search index can never diverge from the actual chunk content.
+
