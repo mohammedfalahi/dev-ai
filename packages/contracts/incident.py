@@ -37,7 +37,6 @@ class Hypothesis(BaseModel):
 
 class CandidateRunbook(BaseModel):
     """A retrieved procedure from the Knowledge Vault."""
-
     chunk_id: str
     runbook_id: str
     title: str
@@ -46,3 +45,4 @@ class CandidateRunbook(BaseModel):
     last_verified: str = ""
     eligibility: str = "eligible"
     score: float
+    content: str = ""
