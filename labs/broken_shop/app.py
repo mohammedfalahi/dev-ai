@@ -54,7 +54,55 @@ def trigger_redis_oom():
         severity="SEV2",
         service="redis-cache",
         error="Shoppers getting logged out because session cache memory is exhausted",
-        timestamp="2026-09-24T12:05:00Z",
+        timestamp="2026-09-24T12:05:00Z"
+    )
+
+@app.post("/faults/edge-502", response_model=AlertResponse)
+def trigger_edge_502():
+    state.current_fault = "edge-502"
+    state.health_status = "degraded"
+    return AlertResponse(
+        incident_id="INC-EDGE-001",
+        severity="SEV2",
+        service="edge-proxy",
+        error="502 Bad Gateway upstream timeout",
+        timestamp="2026-09-24T12:10:00Z"
+    )
+
+@app.post("/faults/webhook-loop", response_model=AlertResponse)
+def trigger_webhook_loop():
+    state.current_fault = "webhook-loop"
+    state.health_status = "degraded"
+    return AlertResponse(
+        incident_id="INC-WEBHOOK-001",
+        severity="SEV2",
+        service="payment-gateway",
+        error="500 error loop in webhook receiver",
+        timestamp="2026-09-24T12:15:00Z"
+    )
+
+@app.post("/faults/db-deadlock", response_model=AlertResponse)
+def trigger_db_deadlock():
+    state.current_fault = "db-deadlock"
+    state.health_status = "degraded"
+    return AlertResponse(
+        incident_id="INC-DB-002",
+        severity="SEV2",
+        service="checkout-api",
+        error="deadlock detected DETAIL: Process 1234 waits for ShareLock",
+        timestamp="2026-09-24T12:20:00Z"
+    )
+
+@app.post("/faults/undocumented-anomaly", response_model=AlertResponse)
+def trigger_undocumented_anomaly():
+    state.current_fault = "undocumented-anomaly"
+    state.health_status = "degraded"
+    return AlertResponse(
+        incident_id="INC-ANOMALY-001",
+        severity="SEV3",
+        service="unknown-service",
+        error="Quantum entanglement cosmic ray failure",
+        timestamp="2026-09-24T12:25:00Z"
     )
 
 

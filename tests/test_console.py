@@ -1,14 +1,12 @@
+from unittest.mock import AsyncMock, patch
+
+# We will patch httpx.AsyncClient so it doesn't try to hit localhost:8081 over the network.
+# But actually, httpx.AsyncClient supports ASGITransport to mock apps directly! Let's just use unittest.mock.
 import pytest
 from fastapi.testclient import TestClient
 
 from apps.console.app import app
-from labs.broken_shop.app import app as broken_shop_app
 from packages.contracts.ico import IncidentContextObject
-
-# We will patch httpx.AsyncClient so it doesn't try to hit localhost:8081 over the network.
-# But actually, httpx.AsyncClient supports ASGITransport to mock apps directly! Let's just use unittest.mock.
-import httpx
-from unittest.mock import patch, AsyncMock
 
 client = TestClient(app)
 

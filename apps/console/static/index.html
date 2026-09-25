@@ -54,6 +54,22 @@
                     <span>💥 Trigger Redis OOM</span>
                     <span class="text-sm">redis-cache</span>
                 </button>
+                <button onclick="triggerFault('edge-502')" class="bg-yellow-100 hover:bg-yellow-200 text-yellow-700 py-2 px-4 rounded font-medium text-left flex justify-between">
+                    <span>💥 Edge Proxy 502</span>
+                    <span class="text-sm">edge-proxy</span>
+                </button>
+                <button onclick="triggerFault('webhook-loop')" class="bg-pink-100 hover:bg-pink-200 text-pink-700 py-2 px-4 rounded font-medium text-left flex justify-between">
+                    <span>💥 Payment Webhook Storm</span>
+                    <span class="text-sm">payment-gateway</span>
+                </button>
+                <button onclick="triggerFault('db-deadlock')" class="bg-red-100 hover:bg-red-200 text-red-700 py-2 px-4 rounded font-medium text-left flex justify-between">
+                    <span>💥 DB Row Deadlock</span>
+                    <span class="text-sm">checkout-api</span>
+                </button>
+                <button onclick="triggerFault('undocumented-anomaly')" class="bg-purple-100 hover:bg-purple-200 text-purple-700 py-2 px-4 rounded font-medium text-left flex justify-between">
+                    <span>👽 Undocumented Anomaly</span>
+                    <span class="text-sm">unknown-service</span>
+                </button>
                 <button onclick="triggerFault('reset')" class="bg-green-100 hover:bg-green-200 text-green-700 py-2 px-4 rounded font-medium text-left flex justify-between mt-4">
                     <span>🔄 Reset System</span>
                     <span class="text-sm">healthy</span>
@@ -188,6 +204,18 @@
 
             appendMessage('agent', data.response);
             updateLatency(data.latency_ms);
+            
+            if (data.approved === true && data.dispatch_event) {
+                const banner = document.createElement('div');
+                banner.className = 'bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4';
+                banner.innerHTML = `
+                    <strong class="font-bold">Action Approved & Dispatched</strong>
+                    <span class="block sm:inline">${data.dispatch_event.audit}</span>
+                    <pre class="mt-2 text-xs bg-green-200 p-2 rounded text-green-900">${data.dispatch_event.command}</pre>
+                `;
+                chatFeed.appendChild(banner);
+                chatFeed.scrollTop = chatFeed.scrollHeight;
+            }
 
         } catch (err) {
             appendMessage('agent', `Error: ${err.message}`);

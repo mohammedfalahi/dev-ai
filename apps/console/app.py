@@ -1,14 +1,13 @@
 import time
+
 import httpx
-from typing import Any
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from apps.investigator.engine import investigate_incident
 from apps.voice.agent import VoiceAgentSession
-from packages.policy.grounding_validator import GroundingValidator
-from packages.policy.tier import classify_command, ActionTier
+from packages.policy.tier import ActionTier, classify_command
 
 app = FastAPI(title="On-call Voice Console")
 
@@ -27,6 +26,7 @@ class ChatResponse(BaseModel):
     latency_ms: float
     approved: bool | None = None
     approval_message: str | None = None
+    dispatch_event: dict | None = None
 
 
 BROKEN_SHOP_URL = "http://localhost:8081"
@@ -80,20 +80,22 @@ async def chat_endpoint(req: ChatRequest):
 
     approved = None
     approval_msg = None
+    dispatch_evt = None
 
     # Handle pending confirmation
     if active_tier == ActionTier.TIER_2_MUTATING and active_proposed_command:
-        is_app, msg = active_session.check_confirmation(
+        is_app, msg, dispatch = active_session.check_confirmation(
             req.message, active_proposed_command
         )
         if is_app:
             approved = True
             approval_msg = msg
+            dispatch_evt = dispatch
             active_proposed_command = None
             active_tier = None
             latency_ms = (time.perf_counter() - start_time) * 1000
             return ChatResponse(
-                response=msg, latency_ms=latency_ms, approved=True, approval_message=msg
+                response=msg, latency_ms=latency_ms, approved=True, approval_message=msg, dispatch_event=dispatch_evt
             )
         else:
             latency_ms = (time.perf_counter() - start_time) * 1000
@@ -102,6 +104,7 @@ async def chat_endpoint(req: ChatRequest):
                 latency_ms=latency_ms,
                 approved=False,
                 approval_message=msg,
+                dispatch_event=None
             )
 
     # Regular turn
@@ -126,6 +129,7 @@ async def chat_endpoint(req: ChatRequest):
         latency_ms=latency_ms,
         approved=approved,
         approval_message=approval_msg,
+        dispatch_event=dispatch_evt
     )
 
 

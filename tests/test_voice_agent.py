@@ -67,15 +67,19 @@ def test_approval_keyword_handshake(mock_ico):
     session = VoiceAgentSession(mock_ico)
     command = "kubectl rollout restart deploy/checkout-api"
     
-    is_approved, msg = session.check_confirmation("yeah sure", command)
+    is_approved, msg, dispatch = session.check_confirmation("yeah sure", command)
     assert not is_approved
     assert "denied" in msg.lower()
+    assert dispatch is None
     
-    is_approved, msg = session.check_confirmation("confirm", command)
+    is_approved, msg, dispatch = session.check_confirmation("confirm", command)
     assert is_approved
     assert "confirmed" in msg.lower()
+    assert dispatch is not None
+    assert dispatch["status"] == "APPROVED"
+    assert dispatch["command"] == command
     
     # Check alternate authorized word 'go'
-    is_approved, msg = session.check_confirmation("GO!", command)
+    is_approved, msg, dispatch = session.check_confirmation("GO!", command)
     assert is_approved
     assert "confirmed" in msg.lower()

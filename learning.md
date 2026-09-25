@@ -558,3 +558,44 @@
 - **Failure Modes Prevented**:
   - **Environment Sprawl**: A monolithic app where the console controls its own state directly (instead of hitting a broken-shop API) creates coupled test fixtures. By preserving the network boundary, we ensure the agent is actually responding to simulated webhooks realistically.
   - **Premature Audio Optimization**: Prevents wasted engineering cycles debugging SIP/RTP negotiation before the raw agent reasoning is proven flawless.
+
+---
+
+## [2026-09-25] Milestone 16: Expanded Console Harness & Dispatch Flow
+
+### 1. What was built & which files were modified
+- Expanded labs/broken_shop/app.py with four new fault injection endpoints to stress test the Incident Context Object generation:
+  - edge-502: Simulated upstream 502 proxy errors.
+  - webhook-loop: Simulated cascading webhook failures.
+  - db-deadlock: Simulated Postgres row locks.
+  - undocumented-anomaly: Injected a bizarre "Quantum entanglement" error specifically designed to ensure the Refusal Gate (RRF < -8.5) catches out-of-domain input.
+- Updated apps/voice/agent.py:
+  - Enriched the system prompt to explicitly link the user's intent around "blast radius" or "impact" to the pre-populated IMPACT and SEVERITY variables from the ICO.
+  - Upgraded the Tier 2 confirmation handshake (check_confirmation) to return a structured audit dispatch payload upon exact keyword confirmation.
+- Modernized apps/console/app.py and apps/console/static/index.html:
+  - Added new fault trigger buttons corresponding to the updated simulator.
+  - Programmed a visual green audit banner tracking the action dispatch pipeline across the virtual websocket context.
+- Ensured total type compliance in tests/test_broken_shop.py.
+- Files modified/created:
+  - labs/broken_shop/app.py (Modified)
+  - apps/voice/agent.py (Modified)
+  - apps/console/app.py (Modified)
+  - apps/console/static/index.html (Modified)
+  - tests/test_broken_shop.py (Modified)
+  - tests/test_console.py (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Concept: Deterministic Mutation Handshake Pipeline**:
+  - Voice interactions are inherently fluid, but mutating production infrastructure requires absolute rigidity. When the LLM proposes an action, the console extracts the command, maps it through the Grounding Validator (verifying it exists in a verified chunk text), checks Tier classification, and stores it in active memory. The conversation continues organically until the human utters the specific keyword (confirm). The keyword isn't fed back to the LLM to "decide" if it was a confirmation; the deterministic Python script catches it via regex and bypasses the LLM to emit the explicit dispatch_event audit payload.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why build custom endpoint simulators for webhooks and proxy errors rather than just mocking the text locally?*
+     - **Answer**: Hardcoded mock text tests internal function logic, but it doesn't test system topology. By emitting these through broken_shop HTTP endpoints, we guarantee that the Investigator engine can actually traverse the network boundary, deserialize the varying alert shapes, map them to different runbook services (payment-gateway vs edge-proxy), and maintain statefulness.
+  2. *How does the system prevent the LLM from hallucinating an impact statement that wasn't in the original alert telemetry?*
+     - **Answer**: The generative model inside handle_turn does not synthesize the impact. The investigate_incident prompt is constrained via response_schema=IncidentContextObject, forcing it to map telemetry into the impact field. The Voice Agent's prompt is subsequently instructed to "refer to the IMPACT field" rather than inventing a blast radius. This breaks the reasoning chain into two isolated, auditable steps.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We passed the dispatch_event through the FastAPI response dictionary rather than hooking directly into an external NATS/Kafka bus locally. This keeps the developer console purely interactive and stateless, enabling fast iteration without booting heavy messaging queues locally, while leaving a clean contract insertion point for production dispatch.
+- **Failure Modes Prevented**:
+  - **Implicit Authorization Outages**: A user saying "yeah that sounds right" or "ok" will not drop a table or restart a cluster because the check_confirmation logic requires an exact keyword.
+  - **Conversational Hallucination of Scale**: Explicitly linking "blast radius" questions to the IMPACT and SEVERITY bounds restricts the voice agent from exaggerating or minimizing the outage severity.
