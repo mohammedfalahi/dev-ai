@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>On-call Voice Console</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .chat-container {
+            height: calc(100vh - 250px);
+            overflow-y: auto;
+        }
+        .message {
+            margin-bottom: 1rem;
+            padding: 10px 15px;
+            border-radius: 8px;
+            max-width: 85%;
+        }
+        .message.agent {
+            background-color: #f3f4f6;
+            align-self: flex-start;
+        }
+        .message.user {
+            background-color: #2563eb;
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans h-screen flex flex-col">
+
+<header class="bg-white shadow-sm p-4 flex justify-between items-center">
+    <h1 class="text-xl font-bold text-gray-800">On-call Voice Developer Console</h1>
+    <div class="flex items-center gap-4">
+        <span class="text-sm text-gray-500 font-medium">Latency Budget: &lt;800ms</span>
+        <div id="latency-badge" class="px-3 py-1 bg-gray-200 text-gray-700 rounded-full text-sm font-bold">
+            0ms
+        </div>
+    </div>
+</header>
+
+<main class="flex-1 flex overflow-hidden">
+    <!-- Left Column: Broken Shop Controls -->
+    <section class="w-1/3 p-6 bg-white border-r overflow-y-auto flex flex-col gap-6">
+        <div>
+            <h2 class="text-lg font-bold mb-4">Labs / Broken Shop Controls</h2>
+            <div class="flex flex-col gap-3">
+                <button onclick="triggerFault('db-pool-exhaustion')" class="bg-red-100 hover:bg-red-200 text-red-700 py-2 px-4 rounded font-medium text-left flex justify-between">
+                    <span>💥 Exhaust DB Pool</span>
+                    <span class="text-sm">checkout-api</span>
+                </button>
+                <button onclick="triggerFault('redis-oom')" class="bg-orange-100 hover:bg-orange-200 text-orange-700 py-2 px-4 rounded font-medium text-left flex justify-between">
+                    <span>💥 Trigger Redis OOM</span>
+                    <span class="text-sm">redis-cache</span>
+                </button>
+                <button onclick="triggerFault('reset')" class="bg-green-100 hover:bg-green-200 text-green-700 py-2 px-4 rounded font-medium text-left flex justify-between mt-4">
+                    <span>🔄 Reset System</span>
+                    <span class="text-sm">healthy</span>
+                </button>
+            </div>
+        </div>
+
+        <div>
+            <h2 class="text-lg font-bold mb-2">Slow Brain Output (ICO)</h2>
+            <p class="text-xs text-gray-500 mb-2">Validated Incident Context Object generated via retrieval & reasoning.</p>
+            <pre id="ico-viewer" class="bg-gray-900 text-green-400 p-4 rounded text-xs overflow-x-auto" style="max-height: 400px;">
+// Trigger a fault to generate ICO...
+            </pre>
+        </div>
+    </section>
+
+    <!-- Right Column: Fast Brain Simulator -->
+    <section class="w-2/3 flex flex-col bg-gray-50">
+        <div class="p-4 border-b bg-white">
+            <h2 class="text-lg font-bold">Fast Brain Voice Simulator (Text Mode)</h2>
+            <p class="text-sm text-gray-500">Communicating using pre-loaded ICO without external DB/RAG lookups.</p>
+        </div>
+        
+        <div id="chat-feed" class="flex-1 p-6 chat-container flex flex-col gap-2">
+            <!-- Messages go here -->
+        </div>
+
+        <div class="p-4 bg-white border-t">
+            <div class="flex gap-2 mb-3 overflow-x-auto pb-2">
+                <button onclick="sendQuickReply('What caused this?')" class="whitespace-nowrap px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded-full hover:bg-blue-200 transition">What caused this?</button>
+                <button onclick="sendQuickReply('What is the blast radius?')" class="whitespace-nowrap px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded-full hover:bg-blue-200 transition">What is the blast radius?</button>
+                <button onclick="sendQuickReply('confirm')" class="whitespace-nowrap px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded-full hover:bg-purple-200 font-bold transition">confirm</button>
+                <button onclick="sendQuickReply('yeah sure')" class="whitespace-nowrap px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded-full hover:bg-gray-300 transition">yeah sure (casual)</button>
+            </div>
+            
+            <form onsubmit="handleChatSubmit(event)" class="flex gap-2">
+                <input type="text" id="chat-input" class="flex-1 border border-gray-300 rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Speak to the agent..." disabled>
+                <button type="submit" id="chat-submit" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>Send</button>
+            </form>
+        </div>
+    </section>
+</main>
+
+<script>
+    const chatFeed = document.getElementById('chat-feed');
+    const chatInput = document.getElementById('chat-input');
+    const chatSubmit = document.getElementById('chat-submit');
+    const icoViewer = document.getElementById('ico-viewer');
+    const latencyBadge = document.getElementById('latency-badge');
+
+    function appendMessage(sender, text) {
+        const div = document.createElement('div');
+        div.className = `message ${sender} shadow-sm`;
+        div.textContent = text;
+        chatFeed.appendChild(div);
+        chatFeed.scrollTop = chatFeed.scrollHeight;
+    }
+
+    function updateLatency(ms) {
+        latencyBadge.textContent = `${ms.toFixed(0)}ms`;
+        if (ms < 800) {
+            latencyBadge.className = 'px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-bold';
+        } else {
+            latencyBadge.className = 'px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-bold';
+        }
+    }
+
+    async function triggerFault(faultName) {
+        chatInput.disabled = true;
+        chatSubmit.disabled = true;
+        chatFeed.innerHTML = '';
+        icoViewer.textContent = 'Investigating incident and generating ICO (Slow Brain)...';
+        
+        appendMessage('agent', 'System alert triggered. Running Investigator workflow...');
+
+        try {
+            const start = performance.now();
+            const res = await fetch(`/api/faults/${faultName}`, { method: 'POST' });
+            const data = await res.json();
+            
+            if (faultName === 'reset') {
+                icoViewer.textContent = JSON.stringify(data, null, 2);
+                appendMessage('agent', 'System reset.');
+                return;
+            }
+
+            icoViewer.textContent = JSON.stringify(data.ico, null, 2);
+            appendMessage('agent', data.greeting);
+            
+            const ms = performance.now() - start;
+            // Investigator is allowed 60s, so we don't color code this latency the same as Fast Brain
+            latencyBadge.textContent = `Inv: ${ms.toFixed(0)}ms`;
+            latencyBadge.className = 'px-3 py-1 bg-gray-200 text-gray-700 rounded-full text-sm font-bold';
+            
+            chatInput.disabled = false;
+            chatSubmit.disabled = false;
+            chatInput.focus();
+        } catch (err) {
+            appendMessage('agent', `Error: ${err.message}`);
+            icoViewer.textContent = 'Error connecting to console backend.';
+        }
+    }
+
+    async function sendQuickReply(text) {
+        if (chatInput.disabled) return;
+        chatInput.value = text;
+        await submitMessage(text);
+    }
+
+    async function handleChatSubmit(e) {
+        e.preventDefault();
+        const text = chatInput.value.trim();
+        if (!text) return;
+        await submitMessage(text);
+    }
+
+    async function submitMessage(text) {
+        chatInput.value = '';
+        appendMessage('user', text);
+        chatInput.disabled = true;
+        chatSubmit.disabled = true;
+
+        try {
+            const res = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text })
+            });
+            const data = await res.json();
+            
+            if (!res.ok) throw new Error(data.detail || 'Chat error');
+
+            appendMessage('agent', data.response);
+            updateLatency(data.latency_ms);
+
+        } catch (err) {
+            appendMessage('agent', `Error: ${err.message}`);
+        } finally {
+            chatInput.disabled = false;
+            chatSubmit.disabled = false;
+            chatInput.focus();
+        }
+    }
+</script>
+</body>
+</html>

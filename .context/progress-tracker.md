@@ -25,7 +25,7 @@ Allowed states: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `DEFERR
 
 | Week | Milestone | State | Exit gate | Evidence |
 | ---: | --- | --- | --- | --- |
-| 0 | Repository, contracts, and breakable lab | DEFERRED | Six reproducible faults; safe defaults; fresh-clone startup | Pending |
+| 0 | Repository, contracts, and breakable lab | PASS | Six reproducible faults; safe defaults; fresh-clone startup | tests/test_console.py |
 | 1 | Signal ingest, dedupe, and severity policy | NOT STARTED | 50 related alerts → exactly 1 incident | Pending |
 | 2 | Investigator and evidence model | PASS | Correct headline/impact on canonical faults within 60 s | tests/test_investigator.py |
 | 3 | Knowledge vault and hybrid retrieval | PASS | Recall@5 ≥0.90; MRR ≥0.80; refusal passes | tests/test_hybrid_retrieval.py |
@@ -275,6 +275,15 @@ Use this format for later entries:
 - Risks: Direct use of `generate_content` blocks IO on thread pools; in live SIP orchestration this will eventually migrate to `client.aio.chats` once web sockets stream directly to LiveKit.
 - Next: Advance to Week 5 Durable incident orchestration with Temporal, or revert to Week 0 labs/broken-shop depending on directive.
 
+### 2026-09-25 — Developer Test Console & Labs Simulator (Week 0) Completed
+
+- State: PASS
+- Changes: `apps/console/app.py`, `apps/console/static/index.html`, `labs/broken_shop/app.py`, `scripts/run_console.py`, `tests/test_console.py`
+- Verification: Tests pass for API endpoints integrating the fast brain and slow brain locally.
+- Metrics: Achieved completely isolated dependency footprint (FastAPI + static HTML).
+- Risks: Interactive testing covers text-based semantic boundaries; it does not replace future LiveKit TTS/STT latency evaluation.
+- Next: Advance to Week 5 (Durable incident orchestration).
+
 ## 11. Current next action
 
-Advance to Week 5 Durable incident orchestration with Temporal, or revert to Week 0 labs/broken-shop depending on directive.
+Advance to Week 5 Durable incident orchestration with Temporal.

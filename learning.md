@@ -521,3 +521,40 @@
 - **Failure Modes Prevented**:
   - **Conversational Latency Spike**: By eliminating vector search on the hot path, we preserve the TTS streaming latency target.
   - **False Authorization (Assent vs. Consent)**: Exact-keyword handshakes prevent casual chatter ("sure whatever") from accidentally modifying production infrastructure.
+
+---
+
+## [2026-09-25] Milestone 15: Developer Test Console
+
+### 1. What was built & which files were modified
+- Initialized apps/console/app.py providing a fast, zero-dependency FastAPI backend serving static HTML.
+- Implemented apps/console/static/index.html to provide an interactive dashboard mimicking an incident control room, combining both Labs/Broken Shop controls and a Voice Simulator chat.
+- Created labs/broken_shop/app.py as a dedicated, lightweight fault injection service operating on a distinct port (8081).
+- Authored scripts/run_console.py to streamline starting both the fault simulator and the interactive console backend concurrently.
+- Re-used core abstractions (Investigator Core Engine, Voice Agent Session, Grounding Validator) natively inside the console to validate integration flows end-to-end without PSTN/SIP networking.
+- Files modified/created:
+  - apps/console/__init__.py (Created)
+  - apps/console/app.py (Created)
+  - apps/console/static/index.html (Created)
+  - labs/broken_shop/app.py (Created)
+  - scripts/run_console.py (Created)
+  - tests/test_console.py (Created)
+  - learning.md (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Concept: Interactive Headless Simulation**:
+  - Validating a streaming conversational AI system is incredibly difficult and expensive if every test requires dialing a real Twilio SIP trunk and parsing raw audio transcription errors. By building a pure text-mode simulator that reuses the exact same VoiceAgentSession classes and GroundingValidators, we achieve deterministic verification of the *cognitive core* (reasoning, grounding, refusals, and handshakes) before attempting to navigate real-world audio latency.
+- **Concept: Multi-Agent Local Orchestration**:
+  - To properly evaluate an outage, the system must trigger faults independently of the observer. Creating a dedicated labs/broken_shop backend isolates the state of the "failing system". The apps/console merely orchestrates HTTP requests to the broken shop, captures its output (like an alert webhook), feeds it to the Slow Brain for investigation, and routes the context to the Fast Brain. This proves architectural separation of concerns locally.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why use vanilla HTML/JS with Tailwind CDN rather than React or Angular for the console frontend?*
+     - **Answer**: The developer console is a diagnostic harness, not a customer-facing product. Introducing Node, NPM, or complex build pipelines violates the zero-footprint directive and heavily burdens Python engineers who need to quickly spin up the environment to test a prompt. A single static index.html ensures the UI is entirely contained and served instantly by FastAPI.
+  2. *Why doesn't the voice simulator in the console execute LiveKit or WebRTC audio connections?*
+     - **Answer**: Our primary focus right now is proving the strict AI safety constraints (e.g. tier classification, hallucination grounding, zero-DB access in the Fast Brain). If we combine cognitive testing with audio networking bugs (packet loss, VAD truncation), finding the root cause of a conversational failure becomes impossible. Text-mode simulation provides surgical isolation of the semantic boundaries.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We elected to instantiate both uvicorn servers dynamically inside scripts/run_console.py using subprocess. This shields developers from having to multiplex terminal windows while developing, vastly improving developer ergonomics.
+- **Failure Modes Prevented**:
+  - **Environment Sprawl**: A monolithic app where the console controls its own state directly (instead of hitting a broken-shop API) creates coupled test fixtures. By preserving the network boundary, we ensure the agent is actually responding to simulated webhooks realistically.
+  - **Premature Audio Optimization**: Prevents wasted engineering cycles debugging SIP/RTP negotiation before the raw agent reasoning is proven flawless.
