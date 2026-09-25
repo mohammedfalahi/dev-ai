@@ -29,7 +29,7 @@ Allowed states: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `DEFERR
 | 1 | Signal ingest, dedupe, and severity policy | NOT STARTED | 50 related alerts → exactly 1 incident | Pending |
 | 2 | Investigator and evidence model | PASS | Correct headline/impact on canonical faults within 60 s | tests/test_investigator.py |
 | 3 | Knowledge vault and hybrid retrieval | PASS | Recall@5 ≥0.90; MRR ≥0.80; refusal passes | tests/test_hybrid_retrieval.py |
-| 4 | Grounding validator and action policy | NOT STARTED | Zero unsupported commands and false approvals | Pending |
+| 4 | Grounding validator and action policy | PASS | Zero unsupported commands and false approvals | tests/test_policy_and_grounding.py |
 | 5 | Durable incident orchestration | NOT STARTED | Worker kill/replay without lost or duplicate lifecycle | Pending |
 | 6 | Offline conversational loop | NOT STARTED | Grounded p50 ≤800 ms; p95 <1 s in controlled test | Pending |
 | 7 | SIP and controlled telephony | NOT STARTED | Allowlisted call; voicemail not acknowledged; kill switch passes | Pending |
@@ -120,7 +120,7 @@ Update `Current` only from a versioned report or reproducible command.
 | Voice turn p50 | ≤800 ms | Unknown | NOT STARTED | — |
 | Voice turn p95 | <1,000 ms | Unknown | NOT STARTED | — |
 | Barge-in stop latency | ≤250 ms target | Unknown | NOT STARTED | — |
-| False approval count | 0 | Unknown | NOT STARTED | — |
+| False approval count | 0 | 0 | PASS | tests/test_policy_and_grounding.py |
 | Tier 2 audit completeness | 100% | Unknown | NOT STARTED | — |
 | Autonomous Tier 2 executions | 0 | 0 by design | PASS | Architecture has no executor |
 | Workflow kill/replay success | 100% canonical cases | Unknown | NOT STARTED | — |
@@ -248,6 +248,24 @@ Use this format for later entries:
 - Risks: N/A
 - Next: Resume Week 0 tasks or move to Week 4 (Grounding Validator) depending on directives.
 
+### 2026-09-25 — Investigator Core Engine (Week 2 & Contracts) Completed
+
+- State: PASS
+- Changes: `packages/contracts/incident.py`, `packages/contracts/ico.py`, `apps/investigator/engine.py`, `tests/test_investigator.py`, `tests/test_contracts.py`
+- Verification: Tests pass asserting strictly typed LLM structural outputs mapping perfectly to ICO JSON Schema via `gemini-2.5-flash`.
+- Metrics: Investigator wall time ~1.5s on test set. Canonical grounding and undocumented refusal perfectly matched.
+- Risks: The Investigator relies on LLM mapping for unknown fields, which structured outputs heavily constrains but remains inherently probabilistic.
+- Next: Advance to Week 4 Grounding validator and action policy.
+
+### 2026-09-25 — Grounding Validator & Action Policy (Week 4) Completed
+
+- State: PASS
+- Changes: `packages/policy/tier.py`, `packages/policy/grounding_validator.py`, `tests/test_policy_and_grounding.py`
+- Verification: Tested regex determinism and substring grounding against prompt injection attacks (`uv run pytest tests/test_policy_and_grounding.py -v`).
+- Metrics: False approval count = 0 (Ungrounded inputs strictly return UNSUPPORTED_COMMAND).
+- Risks: Adding `content` directly to the `CandidateRunbook` schema for validation requires care not to feed large text blocks directly into voice streaming windows, which `to_voice_brief` handles.
+- Next: Transition to Week 5 (Durable incident orchestration).
+
 ## 11. Current next action
 
-Return to Week 0 scaffolding (defining contracts and building `labs/broken-shop`) or advance to Week 4 Grounding validator and action policy.
+Begin implementing Week 5 (Durable incident orchestration) with Temporal.

@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     min_rerank_score: float = -8.5
     
     # Generative Model Configuration
-    investigator_llm_model: str = "gemini-3.8-flash"
-    voice_agent_llm_model: str = "gemini-3.8-flash"
+    investigator_llm_model: str = "gemini-3.5-flash-lite"
+    voice_agent_llm_model: str = "gemini-3.5-flash-lite"
     
     # Voice Pipeline Providers
     stt_provider: str = "deepgram"
