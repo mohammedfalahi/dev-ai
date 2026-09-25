@@ -11,6 +11,8 @@ dependencies = [
     "google-genai>=2.25.0",
     "numpy>=2.5.3",
     "psycopg[binary]>=3.2.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
     "rank-bm25>=0.2.2",
     "sentence-transformers>=6.1.0",
 ]
@@ -28,4 +30,9 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.8",
+    "types-pyyaml>=6.0.12.20260906",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
