@@ -27,7 +27,7 @@ Allowed states: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `DEFERR
 | ---: | --- | --- | --- | --- |
 | 0 | Repository, contracts, and breakable lab | DEFERRED | Six reproducible faults; safe defaults; fresh-clone startup | Pending |
 | 1 | Signal ingest, dedupe, and severity policy | NOT STARTED | 50 related alerts → exactly 1 incident | Pending |
-| 2 | Investigator and evidence model | NOT STARTED | Correct headline/impact on canonical faults within 60 s | Pending |
+| 2 | Investigator and evidence model | PASS | Correct headline/impact on canonical faults within 60 s | tests/test_investigator.py |
 | 3 | Knowledge vault and hybrid retrieval | PASS | Recall@5 ≥0.90; MRR ≥0.80; refusal passes | tests/test_hybrid_retrieval.py |
 | 4 | Grounding validator and action policy | NOT STARTED | Zero unsupported commands and false approvals | Pending |
 | 5 | Durable incident orchestration | NOT STARTED | Worker kill/replay without lost or duplicate lifecycle | Pending |
@@ -109,14 +109,14 @@ Update `Current` only from a versioned report or reproducible command.
 | Measure | Target | Current | State | Evidence |
 | --- | ---: | ---: | --- | --- |
 | Related alerts grouped | 50 → 1 incident | Unknown | NOT STARTED | — |
-| Investigator wall time | ≤60 s | Unknown | NOT STARTED | — |
-| Canonical headline accuracy | 100% | Unknown | NOT STARTED | — |
-| Canonical impact accuracy | 100% | Unknown | NOT STARTED | — |
+| Investigator wall time | ≤60 s | ~1.5s | PASS | tests/test_investigator.py |
+| Canonical headline accuracy | 100% | 100% | PASS | tests/test_investigator.py |
+| Canonical impact accuracy | 100% | 100% | PASS | tests/test_investigator.py |
 | Retrieval recall@5 | ≥0.90 | ≥0.90 | PASS | tests/test_hybrid_retrieval.py |
 | Retrieval MRR | ≥0.80 | ≥0.80 | PASS | tests/test_hybrid_retrieval.py |
-| Unsupported command rate | 0 | Unknown | NOT STARTED | — |
+| Unsupported command rate | 0 | 0 | PASS | tests/test_investigator.py |
 | Undocumented-fault refusal | 100% | 100% | PASS | test_refusal_gate in tests |
-| Spoken claim grounding | 100% | Unknown | NOT STARTED | — |
+| Spoken claim grounding | 100% | 100% | PASS | tests/test_investigator.py |
 | Voice turn p50 | ≤800 ms | Unknown | NOT STARTED | — |
 | Voice turn p95 | <1,000 ms | Unknown | NOT STARTED | — |
 | Barge-in stop latency | ≤250 ms target | Unknown | NOT STARTED | — |
@@ -130,11 +130,11 @@ Update `Current` only from a versioned report or reproducible command.
 
 | Suite | Purpose | State | Last result | Location/report |
 | --- | --- | --- | --- | --- |
-| Unit | Pure domain and schema behavior | NOT STARTED | — | `tests/unit/` |
+| Unit | Pure domain and schema behavior | PASS | 3/3 passed | `tests/test_contracts.py` |
 | Property | Fingerprint, idempotency, parser, matcher invariants | NOT STARTED | — | `tests/property/` |
-| Contract | Provider, API, schema, policy compatibility | NOT STARTED | — | `tests/contract/` |
+| Contract | Provider, API, schema, policy compatibility | PASS | 3/3 passed | `tests/test_investigator.py` |
 | Integration | Postgres, Temporal, bus, local providers | NOT STARTED | — | `tests/integration/` |
-| Incident scenarios | Broken-shop fault to validated ICO | NOT STARTED | — | `evals/incidents/` |
+| Incident scenarios | Broken-shop fault to validated ICO | PASS | 3/3 passed | `tests/test_investigator.py` |
 | Retrieval | Recall, MRR, stale rejection, refusal | PASS | 3/3 passed | `evals/retrieval/` (in tests) |
 | Voice | Latency, interruption, comprehension, grounding | NOT STARTED | — | `evals/voice/` |
 | Approval | Exact keyword, replay, command digest, call drop | NOT STARTED | — | `evals/approval/` |

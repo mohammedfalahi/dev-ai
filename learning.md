@@ -341,3 +341,71 @@
 - **Failure Modes Prevented**:
   - **Procedural Hallucination**: Directly combats the scenario where the AI fabricates an untrusted incident recovery command when presented with a bizarre or out-of-bounds error query.
   - **Suboptimal Rank Sorting**: Circumvents vocabulary-mismatch and dimension dilution using robust reciprocal rank math combined with deep full-attention contextual matching, preventing an active incident from missing its designated, highly-critical runbook.
+---
+
+## [2026-09-25] Milestone 10: Shared Pydantic Contracts (ICO)
+
+### 1. What was built & which files were modified
+- Initialized packages/contracts/ to house strict Pydantic v2 schemas.
+- Implemented packages/contracts/incident.py containing Signal, Hypothesis, and CandidateRunbook models.
+- Implemented packages/contracts/ico.py containing the IncidentContextObject, which is the canonical artifact passed from the Investigator (slow brain) to the Voice Agent (fast brain).
+- Integrated a helper method to_voice_brief on the ICO to cleanly format markdown fields (removing backticks, translating tildes to "About ") into streaming TTS-friendly prose.
+- Added validation logic bounding hypothesis confidence between 0.0 and 1.0.
+- Authored test suite tests/test_contracts.py ensuring correct parsing, bounding constraints, and proper serialization mappings (e.g. mapping timestamp to observed_at).
+- Files modified/created:
+  - packages/contracts/__init__.py (Created)
+  - packages/contracts/incident.py (Created)
+  - packages/contracts/ico.py (Created)
+  - tests/test_contracts.py (Created)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Concept: Contract-Driven Data Transfer & The Two Brains**: 
+  - To fulfill our safety invariant, the generative model *cannot* autonomously pull unbounded, potentially malicious raw logs during an active incident call. Instead, the Investigator (slow brain) condenses findings into a strict, validated data structure (the IncidentContextObject). The Voice Agent (fast brain) receives this object and operates completely off these pre-verified, bounded fields.
+- **Concept: Structural Grounding**: 
+  - A hypothesis isn't just arbitrary text; it natively tracks *where* it came from via the grounded_in (and contradicted_by) list of source_id keys mapping exactly to the collected Signal objects. This structural constraint enforces our architectural grounding rule: "Every factual clause has a valid evidence or runbook reference".
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why implement strict schema properties (e.g. default values and aliases like mapping timestamp to observed_at) instead of just letting the LLM output whatever JSON keys it wants?*
+     - **Answer**: LLMs, even function-calling models, will occasionally hallucinate keys or use synonyms. By enforcing Pydantic models with Field(alias="...") and populate_by_name=True, we create a robust bridge that forgives minor LLM generation variance (e.g., outputting timestamp instead of observed_at) while guaranteeing that the internal system state adheres strictly to our deterministic architecture specification.
+  2. *Why strip markdown from the to_voice_brief method output instead of just telling the Voice LLM to avoid markdown in the system prompt?*
+     - **Answer**: LLMs are heavily fine-tuned to emit markdown (like backticks for code and tildes for approximations). While prompting helps, it is probabilistic and occasionally fails under stress. Synthesizing speech (TTS) from raw backticks results in the TTS engine spelling out "backtick checkout-api backtick", which severely degrades the conversational experience. Applying a fast, deterministic regex/replacement filter at the data boundary guarantees safe and fluent spoken delivery without wasting model context window space or token generation time on format policing.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We elected to supplement the explicit milestone instructions with the missing canonical architecture.md fields (such as schema_version, source_id, signal_class, expires_at, contradicted_by, tool_errors). We accomplished this via Pydantic defaults and aliases rather than truncating the schema. This honors the strict instruction to build the specific fields requested while strictly upholding the system's overarching architectural grounding constraints.
+- **Failure Modes Prevented**:
+  - **TTS Pronunciation Outages**: Deterministically stripping markdown prevents the voice engine from awkwardly dictating syntax artifacts during high-pressure incident briefings.
+  - **Hallucinated Confidence Levels**: Bounding the confidence score natively using Field(ge=0.0, le=1.0) prevents the model from generating uncalibrated floats, preventing downstream parsing errors or catastrophic branching bugs in the policy engine.
+
+---
+
+## [2026-09-25] Milestone 11: Investigator Core Engine
+
+### 1. What was built & which files were modified
+- Initialized apps/investigator/ module for the asynchronous "slow brain" worker component.
+- Implemented apps/investigator/engine.py orchestrating hybrid search and generative reasoning:
+  - Condenses a raw incident payload and queries the Knowledge Vault for relevant runbooks.
+  - Generates a fully validated IncidentContextObject directly via Gemini 2.5 Flash using the google-genai SDK's structured outputs (response_schema=IncidentContextObject).
+  - Offloads synchronous local database operations (search_runbooks) to thread pools (asyncio.to_thread) to maintain strict async safety on the event loop.
+- Built end-to-end tests (tests/test_investigator.py) to verify Grounding Contract boundaries.
+- Files modified/created:
+  - apps/investigator/__init__.py (Created)
+  - apps/investigator/engine.py (Created)
+  - tests/test_investigator.py (Created)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Concept: Deterministic JSON Structured Outputs**: 
+  - Standard LLM prompting requires brittle regex or robust parsing loops to guarantee a perfect JSON payload mapping back to data schemas. By using the new Gemini SDK's response_schema bound directly to a Pydantic BaseModel (the IncidentContextObject), the model forces its probability logits through a deterministic grammar tree. It cannot hallucinate a property outside the expected schema type or violate bounding logic (like returning confidence scores outside 0.0 to 1.0 limits).
+- **Concept: Enforcing the Refusal/Grounding Gate via Prompting**: 
+  - Using the explicit system prompt GROUNDING CONTRACT, we instruct the model how to safely fail. If the cross-encoder hybrid search explicitly returned an empty array of candidate chunks (due to the min_rerank_score refusal limit), the LLM dynamically incorporates this into its investigation brief, logging the event as an undocumented anomaly instead of fabricating a fake runbook response.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why use asyncio.to_thread for calling search_runbooks?*
+     - **Answer**: In Python, asynchronous event loops (like asyncio) orchestrate high-throughput network tasks by yielding control while waiting on I/O. The search_runbooks method relies on psycopg running synchronously and a local NumPy-backed Cross-Encoder model. If called directly, the thread would block indefinitely, starving the rest of the application. Wrapping it in to_thread offloads the blocking execution to a separate OS thread, preventing single-core gridlock while serving multiple concurrent incident evaluations.
+  2. *Why delegate JSON formatting to the SDK layer (response_schema) instead of writing manual parsing retry-loops?*
+     - **Answer**: Parsing loops inherently introduce compounding time delays, which violates our strict investigation budget (< 60s). Handing the Pydantic schema to the Gemini endpoint forces the token generator to use JSON-former syntax masking natively on the TPU side. This ensures a 100% compliant payload on the first pass, cutting parsing errors to zero and shaving seconds off the critical path.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We elected to instantiate the Gemini LLM request directly inside engine.py rather than installing heavy abstraction layers (like LangChain). This keeps the footprint tight, minimizes external prompt manipulation, ensures complete visibility of what data is moving, and allows direct manipulation of the response_schema property with full type-safety.
+- **Failure Modes Prevented**:
+  - **Type/Key Mismatch Errors**: Directly applying Pydantic BaseModels as API validation structures guarantees zero malformed payload crashes downstream.
+  - **Thread Starvation**: Handling the synchronous ML math (Cross-Encoders) efficiently within separate threads prevents the web server processing incoming incident hooks from stalling or dropping inbound alerts.

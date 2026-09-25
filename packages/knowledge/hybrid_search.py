@@ -74,6 +74,8 @@ def search_runbooks(
             output_dimensionality=768,
         ),
     )
+    if not response.embeddings or not response.embeddings[0].values:
+        raise ValueError("Failed to retrieve embeddings from model")
     query_vector = response.embeddings[0].values
 
     candidates: dict[str, _Candidate] = {}
