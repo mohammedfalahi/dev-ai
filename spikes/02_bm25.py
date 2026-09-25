@@ -1,5 +1,7 @@
 import re
+
 from rank_bm25 import BM25Okapi
+
 
 def tokenize(text: str) -> list[str]:
     """
@@ -33,10 +35,10 @@ def main():
         tokenized_query = tokenize(raw_query)
         scores = bm25.get_scores(tokenized_query) #bm25 scores for each document in the corpus (main function)
         
-        print(f"\n=========================================")
+        print("\n=========================================")
         print(f"QUERY {idx}: '{raw_query}'")
         print(f"Tokenized: {tokenized_query}")
-        print(f"=========================================")
+        print("=========================================")
         
         for doc_idx, (doc, score) in enumerate(zip(documents, scores), 1):
             print(f"Doc {doc_idx}: Score = {score:.4f}")

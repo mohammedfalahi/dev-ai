@@ -1,13 +1,13 @@
 import os
-from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Optional
 
 import psycopg
 from google import genai
 from google.genai import types
 from pydantic import BaseModel
 from sentence_transformers import CrossEncoder
+
+from packages.core.config import settings
 
 # Lazy-loaded model to prevent instantiation overhead when not searching
 _cross_encoder = None
@@ -32,21 +32,16 @@ class _Candidate:
     service: str
     heading_path: list[str]
     content: str
-    dense_rank: Optional[int] = None
-    fts_rank: Optional[int] = None
+    dense_rank: int | None = None
+    fts_rank: int | None = None
 
 
 def get_postgres_connection():
-    return psycopg.connect(
-        os.environ.get(
-            "DATABASE_URL",
-            "postgresql://callops:callops_dev@localhost:5432/callops",
-        )
-    )
+    return psycopg.connect(os.environ.get("DATABASE_URL", settings.db_conn_str))
 
 
 def search_runbooks(
-    query: str, top_k: int = 3, min_rerank_score: float = -8.5
+    query: str, top_k: int = 3, min_rerank_score: float | None = None
 ) -> list[RetrievalResult]:
     """
     Search runbooks using a Retrieve-and-Rerank hybrid pipeline.
@@ -59,19 +54,22 @@ def search_runbooks(
       a) Rerank Top-5 fused candidates using MS-MARCO Cross-Encoder.
       b) Apply refusal gate (`min_rerank_score`) to reject out-of-domain queries.
     """
+    if min_rerank_score is None:
+        min_rerank_score = settings.min_rerank_score
+
     global _cross_encoder
     if _cross_encoder is None:
         # Load lightweight Cross-Encoder. MS-MARCO outputs raw negative logits.
-        _cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        _cross_encoder = CrossEncoder(settings.reranker_model)
 
     # 1. Compute query embedding vector
     client = genai.Client()
     response = client.models.embed_content(
-        model="gemini-embedding-001",
+        model=settings.embedding_model,
         contents=query,
         config=types.EmbedContentConfig(
             task_type="RETRIEVAL_QUERY",
-            output_dimensionality=768,
+            output_dimensionality=settings.embedding_dim,
         ),
     )
     if not response.embeddings or not response.embeddings[0].values:
@@ -83,9 +81,9 @@ def search_runbooks(
     with get_postgres_connection() as conn, conn.cursor() as cur:
         # 2. Fetch top 10 dense candidates (pgvector cosine distance)
         cur.execute(
-            """
+            f"""
             SELECT rc.id, rc.runbook_id, r.service, rc.heading_path, rc.content,
-                   (rc.embedding <=> %s::vector(768)) AS dist
+                   (rc.embedding <=> %s::vector({settings.embedding_dim})) AS dist
             FROM runbook_chunks rc
             JOIN runbooks r ON rc.runbook_id = r.id
             ORDER BY dist ASC

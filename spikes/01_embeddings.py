@@ -2,6 +2,7 @@ import numpy as np
 from google import genai
 from google.genai import types
 
+
 def compute_cosine_similarity(vec_x: np.ndarray, vec_y: np.ndarray) -> float:
     """
     Computes the cosine similarity between two vectors.

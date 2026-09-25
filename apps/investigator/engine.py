@@ -1,10 +1,12 @@
-import os
 import asyncio
+import os
 from typing import Any
+
 from google import genai
 from google.genai import types
 
 from packages.contracts.ico import IncidentContextObject
+from packages.core.config import settings
 from packages.knowledge.hybrid_search import search_runbooks
 
 
@@ -13,7 +15,7 @@ async def investigate_incident(
 ) -> IncidentContextObject:
     """
     Investigates a raw alert by querying the hybrid knowledge vault and reasoning over
-    the evidence using Gemini 2.5 Flash to output a validated IncidentContextObject.
+    the evidence using the configured LLM to output a validated IncidentContextObject.
     """
     if db_conn_str:
         os.environ["DATABASE_URL"] = db_conn_str
@@ -27,7 +29,7 @@ async def investigate_incident(
     try:
         # Run synchronous db/model search in a thread pool to avoid blocking the event loop
         retrieved_chunks = await asyncio.to_thread(search_runbooks, primary_error, 3)
-    except Exception as e:
+    except Exception:
         retrieved_chunks = []
 
     # Format retrieval context for the LLM
@@ -70,7 +72,7 @@ async def investigate_incident(
 
     client = genai.Client()
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model=settings.investigator_llm_model,
         contents=prompt,
         config=types.GenerateContentConfig(
             response_mime_type="application/json",

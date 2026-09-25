@@ -1,8 +1,10 @@
 import re
+
 import numpy as np
 from google import genai
 from google.genai import types
 from rank_bm25 import BM25Okapi
+
 
 def tokenize(text: str) -> list[str]:
     """

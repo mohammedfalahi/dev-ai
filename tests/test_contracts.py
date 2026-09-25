@@ -1,8 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from packages.contracts.incident import Signal, Hypothesis, CandidateRunbook, SignalType
 from packages.contracts.ico import IncidentContextObject
+from packages.contracts.incident import CandidateRunbook, Hypothesis, Signal, SignalType
 
 
 def test_ico_instantiation_and_serialization():

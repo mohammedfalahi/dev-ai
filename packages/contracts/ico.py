@@ -1,7 +1,8 @@
 from typing import Any
+
 from pydantic import BaseModel, Field
 
-from packages.contracts.incident import Signal, Hypothesis, CandidateRunbook
+from packages.contracts.incident import CandidateRunbook, Hypothesis, Signal
 
 
 class IncidentContextObject(BaseModel):

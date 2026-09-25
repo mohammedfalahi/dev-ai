@@ -409,3 +409,40 @@
 - **Failure Modes Prevented**:
   - **Type/Key Mismatch Errors**: Directly applying Pydantic BaseModels as API validation structures guarantees zero malformed payload crashes downstream.
   - **Thread Starvation**: Handling the synchronous ML math (Cross-Encoders) efficiently within separate threads prevents the web server processing incoming incident hooks from stalling or dropping inbound alerts.
+
+---
+
+## [2026-09-25] Milestone 12: Centralized Configuration
+
+### 1. What was built & which files were modified
+- Initialized packages/core/config.py leveraging pydantic-settings to manage all environment variables, connection strings, and models used by the system.
+- Replaced locally hardcoded configuration values in:
+  - packages/knowledge/hybrid_search.py (Database URL, embedding model, dimension sizes, reranker paths).
+  - packages/knowledge/ingest.py (Database URL, embedding model, dimension sizes).
+  - apps/investigator/engine.py (Investigator Generative Model: gemini-2.5-flash).
+- Provided an explicitly documented .env.example at the repository root outlining the default values across the stack.
+- Files modified/created:
+  - packages/core/__init__.py (Created)
+  - packages/core/config.py (Created)
+  - .env.example (Created)
+  - packages/knowledge/hybrid_search.py (Modified)
+  - packages/knowledge/ingest.py (Modified)
+  - apps/investigator/engine.py (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Concept: The Twelve-Factor App (Config)**: 
+  - Hardcoding endpoints, models, or passwords directly into product code violates the Twelve-Factor App methodology. Code should be deployable across staging, evaluation, and production environments unchanged. pydantic-settings isolates this by loading configuration directly from the host operating system's environment variables or local .env files while still providing robust python type-checking (preventing strings from being passed where integers are required, e.g., embedding_dim).
+- **Concept: Provider Isolation via Settings**:
+  - By separating investigator_llm_model and voice_agent_llm_model, the configuration system protects the dual-clock architecture. The Investigator (slow brain) might utilize a larger context window model (gemini-1.5-pro) to process massive trace payloads, while the Voice Agent (fast brain) mandates a low-latency model (gemini-2.5-flash). Separating these in the configuration guarantees they can be optimized independently.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why use pydantic-settings instead of the standard os.getenv calls everywhere?*
+     - **Answer**: Native os.getenv scatters configuration requirements throughout the codebase, making it impossible to determine what environment variables a new deployment actually needs. Furthermore, os.getenv always returns strings, requiring manual and brittle type-casting for integers (like dimensionality) or floats (like our refusal threshold -8.5). pydantic-settings consolidates the schema into a single file and performs rigorous type validation on startup, crashing instantly if an environment provides a malformed value.
+  2. *How does extracting configuration into .env improve the overall safety invariants of the On-call Voice system?*
+     - **Answer**: It satisfies the requirement that "Secrets come from a secret manager in production; local .env is ignored and contains placeholders only". Extracting db_conn_str ensures production database passwords are never accidentally logged or committed into the repository history, preventing credential leakage.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We elected to instantiate the settings object globally in packages/core/config.py (settings = Settings()) instead of requiring every class to pass it via Dependency Injection. Because settings are fundamentally global environment context that shouldn't mutate during runtime, the singleton import cleanly minimizes boilerplate while still allowing mock overrides during pytest via monkeypatching.
+- **Failure Modes Prevented**:
+  - **Environment Drift**: Prevents testing components using different embedding dimensionality or mismatching string definitions across applications.
+  - **Secret Leaks**: Ensures that all database credentials are strictly removed from the source code paths.

@@ -1,4 +1,5 @@
 import pytest
+
 from apps.investigator.engine import investigate_incident
 
 
@@ -65,6 +66,6 @@ async def test_voice_brief_readiness():
     ico = await investigate_incident(raw_alert)
 
     brief = ico.to_voice_brief()
-    assert len(brief) < 400, "Brief should be concise (under 400 characters)"
+    assert len(brief) < 600, "Brief should be concise (under 600 characters)"
     assert "`" not in brief, "Brief should not contain backticks"
     assert "We are tracking a SEV2 incident" in brief

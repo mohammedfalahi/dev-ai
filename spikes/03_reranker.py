@@ -1,5 +1,7 @@
 import time
+
 from sentence_transformers import CrossEncoder
+
 
 def main():
     # 1. Load lightweight cross encoder model MiniLM L-6 v2

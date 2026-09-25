@@ -2,6 +2,7 @@ import os
 import sys
 import time
 from pathlib import Path
+
 import psycopg
 
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")

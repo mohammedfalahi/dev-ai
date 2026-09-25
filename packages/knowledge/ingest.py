@@ -5,22 +5,13 @@ import psycopg
 from google import genai
 from google.genai import types
 
+from packages.core.config import settings
 from packages.knowledge.chunker import extract_runbooks_and_chunks
-
-POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
-POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
-POSTGRES_DB = os.getenv("POSTGRES_DB", "callops")
-POSTGRES_USER = os.getenv("POSTGRES_USER", "callops")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "callops_dev")
 
 
 def get_postgres_connection() -> psycopg.Connection:
     """Connect to local Postgres using project environment settings."""
-    conn_info = (
-        f"host={POSTGRES_HOST} port={POSTGRES_PORT} dbname={POSTGRES_DB} "
-        f"user={POSTGRES_USER} password={POSTGRES_PASSWORD}"
-    )
-    return psycopg.connect(conn_info, autocommit=False)
+    return psycopg.connect(os.environ.get("DATABASE_URL", settings.db_conn_str), autocommit=False)
 
 
 def generate_batch_embeddings(
@@ -28,7 +19,7 @@ def generate_batch_embeddings(
     client: genai.Client | None = None,
     batch_size: int = 30,
 ) -> list[list[float]]:
-    """Batch-embed texts using gemini-embedding-001 with 768 MRL dimensions and RETRIEVAL_DOCUMENT task."""
+    """Batch-embed texts using the configured embedding model and dimensions."""
     if not texts:
         return []
 
@@ -40,10 +31,10 @@ def generate_batch_embeddings(
     for i in range(0, len(texts), batch_size):
         batch = texts[i : i + batch_size]
         response = client.models.embed_content(
-            model="gemini-embedding-001",
+            model=settings.embedding_model,
             contents=batch,
             config=types.EmbedContentConfig(
-                output_dimensionality=768,
+                output_dimensionality=settings.embedding_dim,
                 task_type="RETRIEVAL_DOCUMENT",
             ),
         )
