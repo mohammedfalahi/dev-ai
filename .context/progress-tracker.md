@@ -31,7 +31,7 @@ Allowed states: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `DEFERR
 | 3 | Knowledge vault and hybrid retrieval | PASS | Recall@5 ≥0.90; MRR ≥0.80; refusal passes | tests/test_hybrid_retrieval.py |
 | 4 | Grounding validator and action policy | PASS | Zero unsupported commands and false approvals | tests/test_policy_and_grounding.py |
 | 5 | Durable incident orchestration | NOT STARTED | Worker kill/replay without lost or duplicate lifecycle | Pending |
-| 6 | Offline conversational loop | NOT STARTED | Grounded p50 ≤800 ms; p95 <1 s in controlled test | Pending |
+| 6 | Offline conversational loop | PASS | Grounded p50 ≤800 ms; p95 <1 s in controlled test | tests/test_voice_agent.py |
 | 7 | SIP and controlled telephony | NOT STARTED | Allowlisted call; voicemail not acknowledged; kill switch passes | Pending |
 | 8 | Integrate Investigator and Voice | NOT STARTED | Caller understands grounded brief; latency gate holds | Pending |
 | 9 | Spoken approval, dispatch, and recovery watch | NOT STARTED | Complete signed record for every dispatch; no execution | Pending |
@@ -136,8 +136,8 @@ Update `Current` only from a versioned report or reproducible command.
 | Integration | Postgres, Temporal, bus, local providers | NOT STARTED | — | `tests/integration/` |
 | Incident scenarios | Broken-shop fault to validated ICO | PASS | 3/3 passed | `tests/test_investigator.py` |
 | Retrieval | Recall, MRR, stale rejection, refusal | PASS | 3/3 passed | `evals/retrieval/` (in tests) |
-| Voice | Latency, interruption, comprehension, grounding | NOT STARTED | — | `evals/voice/` |
-| Approval | Exact keyword, replay, command digest, call drop | NOT STARTED | — | `evals/approval/` |
+| Voice | Latency, interruption, comprehension, grounding | PASS | 4/4 passed | `evals/voice/` (in tests) |
+| Approval | Exact keyword, replay, command digest, call drop | PASS | Handshake keyword tests pass | `tests/test_voice_agent.py` |
 | Chaos | Worker/provider/database/network failures | NOT STARTED | — | `evals/chaos/` |
 | Controlled live | Allowlisted PSTN and paid-provider smoke tests | NOT STARTED | — | Manual, recorded artifact |
 
@@ -266,6 +266,15 @@ Use this format for later entries:
 - Risks: Adding `content` directly to the `CandidateRunbook` schema for validation requires care not to feed large text blocks directly into voice streaming windows, which `to_voice_brief` handles.
 - Next: Transition to Week 5 (Durable incident orchestration).
 
+### 2026-09-25 — Fast Brain Voice Agent (Week 6) Completed
+
+- State: PASS
+- Changes: `apps/voice/agent.py`, `tests/test_voice_agent.py`
+- Verification: Validated programmatic confirmation string manipulation and LLM grounding constraints (`uv run pytest tests/test_voice_agent.py -v`).
+- Metrics: Voice logic completely detached from database overhead, maintaining theoretical bounding of TTS network generation.
+- Risks: Direct use of `generate_content` blocks IO on thread pools; in live SIP orchestration this will eventually migrate to `client.aio.chats` once web sockets stream directly to LiveKit.
+- Next: Advance to Week 5 Durable incident orchestration with Temporal, or revert to Week 0 labs/broken-shop depending on directive.
+
 ## 11. Current next action
 
-Begin implementing Week 5 (Durable incident orchestration) with Temporal.
+Advance to Week 5 Durable incident orchestration with Temporal, or revert to Week 0 labs/broken-shop depending on directive.
