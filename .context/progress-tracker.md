@@ -30,7 +30,7 @@ Allowed states: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `DEFERR
 | 2 | Investigator and evidence model | PASS | Correct headline/impact on canonical faults within 60 s | tests/test_investigator.py |
 | 3 | Knowledge vault and hybrid retrieval | PASS | Recall@5 ≥0.90; MRR ≥0.80; refusal passes | tests/test_hybrid_retrieval.py |
 | 4 | Grounding validator and action policy | PASS | Zero unsupported commands and false approvals | tests/test_policy_and_grounding.py |
-| 5 | Durable incident orchestration | NOT STARTED | Worker kill/replay without lost or duplicate lifecycle | Pending |
+| 5 | Durable incident orchestration | PASS | Worker kill/replay without lost or duplicate lifecycle | tests/test_orchestrator.py |
 | 6 | Offline conversational loop | PASS | Grounded p50 ≤800 ms; p95 <1 s in controlled test | tests/test_voice_agent.py |
 | 7 | SIP and controlled telephony | NOT STARTED | Allowlisted call; voicemail not acknowledged; kill switch passes | Pending |
 | 8 | Integrate Investigator and Voice | NOT STARTED | Caller understands grounded brief; latency gate holds | Pending |
@@ -284,6 +284,15 @@ Use this format for later entries:
 - Risks: Interactive testing covers text-based semantic boundaries; it does not replace future LiveKit TTS/STT latency evaluation.
 - Next: Advance to Week 5 (Durable incident orchestration).
 
+### 2026-09-26 — Durable Incident Orchestration (Week 5 / Milestone 17) Completed
+
+- State: PASS
+- Changes: `apps/orchestrator/activities.py`, `apps/orchestrator/workflow.py`, `tests/test_orchestrator.py`
+- Verification: `uv run pytest tests/test_orchestrator.py -v` proves deterministic timeouts and happy-path workflow state transitions utilizing Temporal time-skipping.
+- Metrics: Single durable workflow per incident enforced. Workflow kill/replay completely insulated via Event Sourcing.
+- Risks: Ingestion deduplication (Week 1) must be built next to avoid spamming the Temporal task queue with redundant alerts during a localized incident storm.
+- Next: Transition to Week 1 Signal ingest, dedupe, and severity policy.
+
 ## 11. Current next action
 
-Advance to Week 5 Durable incident orchestration with Temporal.
+Implement Week 1: Signal ingest, dedupe, and severity policy.
