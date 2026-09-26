@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     stt_provider: str = "deepgram"
     tts_provider: str = "google-tts"
 
+    # Gateway & Ingest Configuration
+    hmac_secret: str = "dev-secret-key-1234"
+    grouping_window_seconds: int = 60
+    temporal_host: str = "localhost:7233"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 

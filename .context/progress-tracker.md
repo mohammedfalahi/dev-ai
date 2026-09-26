@@ -26,7 +26,7 @@ Allowed states: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `DEFERR
 | Week | Milestone | State | Exit gate | Evidence |
 | ---: | --- | --- | --- | --- |
 | 0 | Repository, contracts, and breakable lab | PASS | Six reproducible faults; safe defaults; fresh-clone startup | tests/test_console.py |
-| 1 | Signal ingest, dedupe, and severity policy | NOT STARTED | 50 related alerts → exactly 1 incident | Pending |
+| 1 | Signal ingest, dedupe, and severity policy | PASS | 50 related alerts → exactly 1 incident | tests/test_gateway.py |
 | 2 | Investigator and evidence model | PASS | Correct headline/impact on canonical faults within 60 s | tests/test_investigator.py |
 | 3 | Knowledge vault and hybrid retrieval | PASS | Recall@5 ≥0.90; MRR ≥0.80; refusal passes | tests/test_hybrid_retrieval.py |
 | 4 | Grounding validator and action policy | PASS | Zero unsupported commands and false approvals | tests/test_policy_and_grounding.py |
@@ -108,7 +108,7 @@ Update `Current` only from a versioned report or reproducible command.
 
 | Measure | Target | Current | State | Evidence |
 | --- | ---: | ---: | --- | --- |
-| Related alerts grouped | 50 → 1 incident | Unknown | NOT STARTED | — |
+| Related alerts grouped | 50 → 1 incident | 50 → 1 incident | PASS | tests/test_gateway.py |
 | Investigator wall time | ≤60 s | ~1.5s | PASS | tests/test_investigator.py |
 | Canonical headline accuracy | 100% | 100% | PASS | tests/test_investigator.py |
 | Canonical impact accuracy | 100% | 100% | PASS | tests/test_investigator.py |
@@ -293,6 +293,15 @@ Use this format for later entries:
 - Risks: Ingestion deduplication (Week 1) must be built next to avoid spamming the Temporal task queue with redundant alerts during a localized incident storm.
 - Next: Transition to Week 1 Signal ingest, dedupe, and severity policy.
 
+### 2026-09-26 — Signal Ingest, Deduplication, and Severity Policy (Week 1 / Milestone 18) Completed
+
+- State: PASS
+- Changes: `packages/contracts/alert.py`, `apps/gateway/app.py`, `apps/gateway/dedupe.py`, `tests/test_gateway.py`
+- Verification: `uv run pytest tests/test_gateway.py -v` (5/5 passed). Proved that 50 duplicate alerts collapse into exactly 1 incident with exactly 1 workflow start intent.
+- Metrics: 50 related alerts → 1 incident (PASS). Replay protection and HMAC verification verified.
+- Risks: Provider-specific adapters (Prometheus Alertmanager webhook format vs Sentry webhook format) need mapping into `NormalizedAlert` in production.
+- Next: Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
+
 ## 11. Current next action
 
-Implement Week 1: Signal ingest, dedupe, and severity policy.
+Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
