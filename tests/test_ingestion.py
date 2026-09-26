@@ -11,19 +11,19 @@ def test_runbook_ingestion_and_postgres_verification():
 
     # 1. Execute ingestion function
     stats = ingest_runbooks(RUNBOOKS_FILE)
-    assert stats["runbooks_inserted"] == 6, (
-        f"Expected 6 runbooks, got {stats['runbooks_inserted']}"
+    assert stats["runbooks_inserted"] >= 20, (
+        f"Expected at least 20 runbooks, got {stats['runbooks_inserted']}"
     )
     assert stats["chunks_inserted"] > 0, "No chunks were ingested"
 
     total_chunks_first_run = stats["chunks_inserted"]
 
     with get_postgres_connection() as conn, conn.cursor() as cur:
-        # 2. Assert SELECT count(*) FROM runbooks equals 6
+        # 2. Assert SELECT count(*) FROM runbooks is at least 20
         cur.execute("SELECT count(*) FROM runbooks;")
         runbook_count = cur.fetchone()[0]
-        assert runbook_count == 6, (
-            f"Expected 6 runbooks in database, found {runbook_count}"
+        assert runbook_count >= 20, (
+            f"Expected at least 20 runbooks in database, found {runbook_count}"
         )
 
         # 3. Assert SELECT count(*) FROM runbook_chunks is greater than 0
@@ -58,27 +58,27 @@ def test_runbook_ingestion_and_postgres_verification():
             f"Found {empty_fts_count} rows with empty or ungenerated fts tsvector"
         )
 
-        # Verify specific runbook IDs exist
+        # Verify original runbook IDs exist as a subset
         cur.execute("SELECT id, service, title FROM runbooks ORDER BY id;")
         db_runbooks = cur.fetchall()
         rb_ids = [r[0] for r in db_runbooks]
-        expected_ids = [
+        expected_ids = {
             "RB-EDGE-001",
             "RB-K8S-001",
             "RB-PG-001",
             "RB-PG-002",
             "RB-REDIS-001",
             "RB-STRIPE-001",
-        ]
-        assert sorted(rb_ids) == expected_ids
+        }
+        assert expected_ids.issubset(set(rb_ids))
 
     # 6. Verify Idempotency: running ingestion again must not duplicate records
     stats_repeat = ingest_runbooks(RUNBOOKS_FILE)
-    assert stats_repeat["runbooks_inserted"] == 6
+    assert stats_repeat["runbooks_inserted"] == stats["runbooks_inserted"]
     assert stats_repeat["chunks_inserted"] == total_chunks_first_run
 
     with get_postgres_connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM runbooks;")
-        assert cur.fetchone()[0] == 6
+        assert cur.fetchone()[0] == runbook_count
         cur.execute("SELECT count(*) FROM runbook_chunks;")
         assert cur.fetchone()[0] == total_chunks_first_run

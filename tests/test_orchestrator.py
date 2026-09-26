@@ -1,18 +1,11 @@
 import asyncio
+
 import pytest
+from temporalio import activity
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
-from temporalio.client import WorkflowHandle
 
 from apps.orchestrator.workflow import IncidentLifecycleWorkflow
-from apps.orchestrator.activities import (
-    investigate_incident_activity,
-    validate_grounding_activity,
-    notify_oncall_activity,
-    dispatch_escalation_activity,
-)
-
-from temporalio import activity
 
 # We mock the actual activity implementations so they don't hit the DB or LLM during workflow tests.
 # This validates the state machine purely.
@@ -66,69 +59,70 @@ def activities():
 @pytest.mark.asyncio
 async def test_workflow_happy_path(activities):
     """Test 1: Happy path where triage completes and signal acknowledges incident before timeout."""
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        async with Worker(
-            env.client,
+    async with await WorkflowEnvironment.start_time_skipping() as env, Worker(
+        env.client,
+        task_queue="test-task-queue",
+        workflows=[IncidentLifecycleWorkflow],
+        activities=activities,
+    ):
+        # Start workflow
+        handle = await env.client.start_workflow(
+            IncidentLifecycleWorkflow.run,
+            {"incident_id": "INC-100"},
+            id="incident-workflow-INC-100",
             task_queue="test-task-queue",
-            workflows=[IncidentLifecycleWorkflow],
-            activities=activities,
-        ):
-            # Start workflow
-            handle = await env.client.start_workflow(
-                IncidentLifecycleWorkflow.run,
-                {"incident_id": "INC-100"},
-                id="incident-workflow-INC-100",
-                task_queue="test-task-queue",
-            )
+        )
 
-            # Wait for workflow to reach AWAITING_ACK state
-            # In time-skipping env, it runs as fast as possible until it hits a timer.
-            for _ in range(10):
-                status = await handle.query(IncidentLifecycleWorkflow.get_status)
-                if status["status"] == "AWAITING_ACK":
-                    break
-                await asyncio.sleep(0.1)
-
-            assert status["status"] == "AWAITING_ACK"
-
-            # Send signal
-            await handle.signal(
-                IncidentLifecycleWorkflow.acknowledge_incident, "eng-123"
-            )
-
-            # Workflow should complete
-            result = await handle.result()
-
-            assert result["result"] == "Acknowledged"
-
-            # Check final status
+        # Wait for workflow to reach AWAITING_ACK state
+        # In time-skipping env, it runs as fast as possible until it hits a timer.
+        for _ in range(10):
             status = await handle.query(IncidentLifecycleWorkflow.get_status)
-            assert status["status"] == "ACKNOWLEDGED"
-            assert status["acknowledged_by"] == "eng-123"
+            if status["status"] == "AWAITING_ACK":
+                break
+            await asyncio.sleep(0.1)
+
+        assert status["status"] == "AWAITING_ACK"
+
+        # Send signal
+        await handle.signal(
+            IncidentLifecycleWorkflow.acknowledge_incident, "eng-123"
+        )
+
+        # Workflow should complete
+        result = await handle.result()
+
+        assert result["result"] == "Acknowledged"
+
+        # Check final status
+        status = await handle.query(IncidentLifecycleWorkflow.get_status)
+        assert status["status"] == "ACKNOWLEDGED"
+        assert status["acknowledged_by"] == "eng-123"
 
 
 @pytest.mark.asyncio
 async def test_workflow_escalation_timeout(activities):
     """Test 2: Timeout path where missing acknowledgment triggers the escalation activity."""
-    async with await WorkflowEnvironment.start_time_skipping() as env:
-        async with Worker(
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        Worker(
             env.client,
             task_queue="test-task-queue-timeout",
             workflows=[IncidentLifecycleWorkflow],
             activities=activities,
-        ):
-            handle = await env.client.start_workflow(
-                IncidentLifecycleWorkflow.run,
-                {"incident_id": "INC-200"},
-                id="incident-workflow-INC-200",
-                task_queue="test-task-queue-timeout",
-            )
+        ),
+    ):
+        handle = await env.client.start_workflow(
+            IncidentLifecycleWorkflow.run,
+            {"incident_id": "INC-200"},
+            id="incident-workflow-INC-200",
+            task_queue="test-task-queue-timeout",
+        )
 
-            # Do NOT send signal. Instead, advance time to force the timeout.
-            # The time-skipping environment automatically advances time if we wait for the result.
-            result = await handle.result()
+        # Do NOT send signal. Instead, advance time to force the timeout.
+        # The time-skipping environment automatically advances time if we wait for the result.
+        result = await handle.result()
 
-            assert result["result"] == "Escalated"
+        assert result["result"] == "Escalated"
 
-            status = await handle.query(IncidentLifecycleWorkflow.get_status)
-            assert status["status"] == "ESCALATED"
+        status = await handle.query(IncidentLifecycleWorkflow.get_status)
+        assert status["status"] == "ESCALATED"

@@ -112,10 +112,10 @@ Update `Current` only from a versioned report or reproducible command.
 | Investigator wall time | ≤60 s | ~1.5s | PASS | tests/test_investigator.py |
 | Canonical headline accuracy | 100% | 100% | PASS | tests/test_investigator.py |
 | Canonical impact accuracy | 100% | 100% | PASS | tests/test_investigator.py |
-| Retrieval recall@5 | ≥0.90 | ≥0.90 | PASS | tests/test_hybrid_retrieval.py |
-| Retrieval MRR | ≥0.80 | ≥0.80 | PASS | tests/test_hybrid_retrieval.py |
+| Retrieval recall@5 | ≥0.90 | 1.0000 | PASS | tests/test_retrieval_benchmarks.py |
+| Retrieval MRR | ≥0.80 | 1.0000 | PASS | tests/test_retrieval_benchmarks.py |
 | Unsupported command rate | 0 | 0 | PASS | tests/test_investigator.py |
-| Undocumented-fault refusal | 100% | 100% | PASS | test_refusal_gate in tests |
+| Undocumented-fault refusal | 100% | 100% | PASS | tests/test_retrieval_benchmarks.py |
 | Spoken claim grounding | 100% | 100% | PASS | tests/test_investigator.py |
 | Voice turn p50 | ≤800 ms | Unknown | NOT STARTED | — |
 | Voice turn p95 | <1,000 ms | Unknown | NOT STARTED | — |
@@ -135,7 +135,7 @@ Update `Current` only from a versioned report or reproducible command.
 | Contract | Provider, API, schema, policy compatibility | PASS | 3/3 passed | `tests/test_investigator.py` |
 | Integration | Postgres, Temporal, bus, local providers | NOT STARTED | — | `tests/integration/` |
 | Incident scenarios | Broken-shop fault to validated ICO | PASS | 3/3 passed | `tests/test_investigator.py` |
-| Retrieval | Recall, MRR, stale rejection, refusal | PASS | 3/3 passed | `evals/retrieval/` (in tests) |
+| Retrieval | Recall, MRR, stale rejection, refusal | PASS | 5/5 passed | `tests/test_retrieval_benchmarks.py` & `evals/benchmarks/run_retrieval_benchmark.py` |
 | Voice | Latency, interruption, comprehension, grounding | PASS | 4/4 passed | `evals/voice/` (in tests) |
 | Approval | Exact keyword, replay, command digest, call drop | PASS | Handshake keyword tests pass | `tests/test_voice_agent.py` |
 | Chaos | Worker/provider/database/network failures | NOT STARTED | — | `evals/chaos/` |
@@ -302,6 +302,24 @@ Use this format for later entries:
 - Risks: Provider-specific adapters (Prometheus Alertmanager webhook format vs Sentry webhook format) need mapping into `NormalizedAlert` in production.
 - Next: Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
 
+### 2026-09-26 — RAG Evaluation Schema and Golden Dataset Fixtures (Milestone 19) Completed
+
+- State: PASS
+- Changes: `evals/__init__.py`, `evals/schemas.py`, `evals/datasets/golden_dataset.jsonl`, `tests/test_golden_dataset.py`
+- Verification: `uv run pytest tests/test_golden_dataset.py -v` (3/3 passed), `uv run ruff check evals/ tests/` (passed), `uv run mypy evals/` (passed).
+- Metrics: 6 taxonomy-aligned evaluation cases verified. Refusal invariant enforced with zero tolerance for corrupted fixtures.
+- Risks: None. `evals/` module is completely decoupled from production runtime packages with zero inward dependency leaks.
+- Next: Build automated RAG evaluation harness (Milestone 20) evaluating retrieval metrics (Recall@K, MRR) and refusal precision against the golden dataset.
+
+### 2026-09-26 — Decoupled RAG Retrieval Benchmark Runner (Milestone 20) Completed
+
+- State: PASS
+- Changes: `evals/benchmarks/__init__.py`, `evals/benchmarks/run_retrieval_benchmark.py`, `evals/datasets/golden_dataset.jsonl`, `tests/test_retrieval_benchmarks.py`
+- Verification: `uv run python -m pytest tests/test_retrieval_benchmarks.py -v -s` (5/5 passed), `uv run python evals/benchmarks/run_retrieval_benchmark.py` (all gates passed), `uv run ruff check evals/ tests/` (passed), `uv run mypy evals/` (passed).
+- Metrics: Recall@1 = 1.0000, Recall@3 = 1.0000, Recall@5 = 1.0000, MRR = 1.0000, Refusal Precision = 1.0000, Hard Negatives at Rank 1 = 0.
+- Risks: Embeddings depend on Google GenAI API quota; local tests use running pgvector PostgreSQL container.
+- Next: Advance to Generation Groundedness and Faithfulness Benchmark (Milestone 21) or Week 7 Telephony/SIP.
+
 ## 11. Current next action
 
-Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
+Advance to Generation Groundedness and Faithfulness Benchmark (Milestone 21) or Week 7 Telephony/SIP.

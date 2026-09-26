@@ -30,9 +30,8 @@ class GroundingValidator:
         tier = classify_command(candidate_command)
         
         # For mutating actions, ensure we have properly audited the specific chunk it originated from
-        if tier == ActionTier.TIER_2_MUTATING:
-            if not found_chunk_id:
-                return False, "UNSUPPORTED_COMMAND: Mutating action requires a valid chunk_id for audit logging."
+        if tier == ActionTier.TIER_2_MUTATING and not found_chunk_id:
+            return False, "UNSUPPORTED_COMMAND: Mutating action requires a valid chunk_id for audit logging."
                 
         return True, f"VALID: Command is authorized under {tier.value} from chunk {found_chunk_id}."
 
@@ -47,7 +46,4 @@ class GroundingValidator:
             return False
             
         # Reject raw JSON literals / brackets
-        if re.search(r'\{.*\}', brief_text):
-            return False
-            
-        return True
+        return not bool(re.search(r'\{.*\}', brief_text))

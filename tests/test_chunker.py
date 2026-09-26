@@ -16,7 +16,7 @@ def test_chunk_generated_runbooks():
     chunks = chunk_markdown_file(RUNBOOKS_FILE)
     assert len(chunks) > 0, "No chunks were produced from runbooks.md"
 
-    # 1. Assert all 6 runbooks are extracted
+    # 1. Assert all original runbooks and expanded corpus (at least 20 runbooks) are extracted
     extracted_runbook_ids = {chunk.runbook_id for chunk in chunks}
     expected_runbook_ids = {
         "RB-PG-001",
@@ -29,8 +29,8 @@ def test_chunk_generated_runbooks():
     assert expected_runbook_ids.issubset(extracted_runbook_ids), (
         f"Missing expected runbooks: {expected_runbook_ids - extracted_runbook_ids}"
     )
-    assert len(extracted_runbook_ids) == 6, (
-        f"Expected 6 runbooks, found {len(extracted_runbook_ids)}"
+    assert len(extracted_runbook_ids) >= 20, (
+        f"Expected at least 20 runbooks, found {len(extracted_runbook_ids)}"
     )
 
     # 2. Assert chunk IDs are deterministic and unique
