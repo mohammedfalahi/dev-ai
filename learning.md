@@ -605,38 +605,45 @@
 ## [2026-09-26] Milestone 17: Durable Incident Orchestration (Temporal)
 
 ### 1. What was built & which files were modified
-- Initialized apps/orchestrator/ to handle incident lifecycle management via Temporal.
-- Developed apps/orchestrator/activities.py containing idempotency wrappers for the core application bounds:
-  - investigate_incident_activity (maps to slow brain investigate_incident).
-  - validate_grounding_activity (maps to deterministic Grounding Validator rules).
-  - notify_oncall_activity (initial paging logic).
-  - dispatch_escalation_activity (timeout / secondary escalation handler).
-- Designed apps/orchestrator/workflow.py featuring IncidentLifecycleWorkflow, providing deterministic orchestration using a strict state machine (INVESTIGATING -> VALIDATING -> NOTIFYING -> AWAITING_ACK -> ESCALATED/ACKNOWLEDGED). 
-- Incorporated a get_status Temporal @workflow.query to provide real-time visibility into the state machine without side effects.
-- Tested workflows deterministically using temporalio.testing.WorkflowEnvironment, relying on Temporal's time-skipping mechanics to rapidly test 90-second timeout escalations in less than a second.
-- Files modified/created:
-  - apps/orchestrator/__init__.py (Created)
-  - apps/orchestrator/activities.py (Created)
-  - apps/orchestrator/workflow.py (Created)
-  - tests/test_orchestrator.py (Created)
-  - learning.md (Modified)
-  - pyproject.toml & uv.lock (Added temporalio)
+- Initialized `apps/orchestrator/` to govern the complete incident lifecycle using durable Temporal workflows and activities.
+- Implemented `apps/orchestrator/activities.py`:
+  - `investigate_incident_activity`: Idempotent activity executing the slow-brain Investigator engine (`investigate_incident`) and serializing the resulting `IncidentContextObject`.
+  - `validate_grounding_activity`: Idempotent activity running deterministic Grounding Validator checks on the generated ICO.
+  - `notify_oncall_activity`: Activity dispatching initial voice alerts/pages to the engineer.
+  - `dispatch_escalation_activity`: Activity dispatching secondary escalation steps if acknowledgment times out.
+- Implemented `apps/orchestrator/workflow.py`:
+  - `IncidentLifecycleWorkflow`: Deterministic state machine orchestrating `INVESTIGATING` -> `VALIDATING` -> `NOTIFYING` -> `AWAITING_ACK` -> `ACKNOWLEDGED` / `ESCALATED`.
+  - Enforced a durable 90-second escalation timer via `workflow.wait_condition` and `asyncio.TimeoutError`.
+  - Implemented `@workflow.signal` `acknowledge_incident(engineer_id)` for human-in-the-loop acknowledgment.
+  - Implemented `@workflow.query` `get_status()` for real-time, non-mutating observability into workflow state.
+- Created test suite `tests/test_orchestrator.py`:
+  - Evaluated both happy-path acknowledgment and unacknowledged escalation timeout using `temporalio.testing.WorkflowEnvironment` with time-skipping capabilities.
+- Files touched:
+  - `apps/orchestrator/workflow.py` (Created)
+  - `apps/orchestrator/activities.py` (Created)
+  - `tests/test_orchestrator.py` (Created)
+  - `.context/progress-tracker.md` (Modified)
+  - `pyproject.toml` & `uv.lock` (Modified)
 
-### 2. The Core Concept & Math/Logic behind it (Plain English)
-- **Concept: Event Sourcing & Durable Execution**:
-  - Without Temporal, if our Voice API server dies while an incident is open, the memory of that incident (and any pending timeout escalations) disappears.
-  - In a durable execution model, the workflow state is mapped against an event log (history) stored in a database. If the worker node dies on Step 3, another worker automatically picks up the workflow, replays the event history instantly (without re-running previously successful API calls / activities), and resumes exactly at Step 3. This guarantees that an unacknowledged incident will ALWAYS escalate, regardless of server crashes.
-- **Concept: Time Skipping**:
-  - Testing code with asyncio.sleep(90) usually forces CI pipelines to hang for a minute and a half. Temporal's test environment simulates a virtual clock. When a workflow hits a wait condition (like awaiting an acknowledgement signal), the test environment instantly fast-forwards the clock to trigger the timeout if no signals arrive, dropping test execution times from minutes to milliseconds.
+### 2. The Core Concept Explained (Plain English)
+- **Deterministic Event Sourcing & Replay Safety**:
+  - In traditional backend services, long-running incident lifecycles depend on in-memory timers or ad-hoc database polling loops. If the server crashes or restarts midway, the in-memory timer is lost and the incident remains unescalated.
+  - Temporal solves this by storing an immutable sequence of events (history) in its database. When a workflow execution needs to resume (e.g., after a worker process dies), Temporal restarts the workflow code from line 1 and **replays** the saved history.
+  - To guarantee that replay doesn't cause divergent state, workflow definitions MUST be completely deterministic: no direct network I/O, no random numbers, no thread-local state, and no system clock reads.
+- **Why Activities Wrap Non-Deterministic LLM / API Calls**:
+  - External operations like calling `google-genai` (LLM inference) or dialing a SIP trunk are inherently non-deterministic: the LLM may generate different tokens, and network latency varies with each call.
+  - In Temporal, all non-deterministic operations are encapsulated in `@activity.defn`. When an activity succeeds, its exact return value is recorded in the workflow event history. During workflow replay, Temporal does NOT re-execute the activity; it immediately returns the recorded result from history. This preserves workflow determinism and guarantees that expensive external calls are never re-run unnecessarily.
 
 ### 3. Interview Defense
 - **Probable Interview Questions**:
-  1. *Why wrap the existing Python methods (investigate_incident) in @activity.defn instead of running them directly in the @workflow.run function?*
-     - **Answer**: Temporal workflows MUST be perfectly deterministic. They cannot contain HTTP calls, network bounds, random numbers, or heavy I/O because if the workflow crashes, Temporal must be able to replay the function identically. Calling an LLM API directly inside the workflow would cause a non-deterministic result (the LLM might reply differently on replay). By wrapping it in an activity, Temporal executes it once, saves the JSON result in its persistent event log, and simply fetches that saved JSON during replay.
-  2. *How does the system prevent generating two separate incident response calls if broken-shop spams 50 webhook alerts?*
-     - **Answer**: While our signal ingestion deduplication (Milestone 18) acts as the first line of defense, Temporal provides a structural guarantee via Workflow ID uniqueness. When we launch the workflow, we assign it id="incident-workflow-{incident_id}". If a duplicate alert triggers a second workflow start with the same ID, Temporal rejects it. This ensures "Idempotency everywhere" and guarantees only one active orchestration process per incident.
-- **Architecture Choice (Why this over alternatives?)**:
-  - We chose temporalio over building a custom state machine on PostgreSQL/Celery. Building durable sleep timers (wait_condition) and reliable retry polling using polling database queues introduces severe overhead and race conditions. Temporal handles the event persistence natively in its Go/Rust core, leaving us with clean, asynchronous Python business logic.
+  1. *What happens if a worker crashes while an LLM investigation activity is executing, and how does Temporal prevent duplicate side effects?*
+     - **Answer**: If a worker node crashes mid-activity, Temporal detects the missing activity heartbeat/timeout and automatically reschedules the activity on another available worker. Because the activity is designed to be idempotent and takes an incident ID, downstream services remain consistent. Crucially, once an activity finishes and its output is logged to the workflow history, subsequent workflow replays will NEVER re-execute that activity, preventing duplicate LLM API invocations.
+  2. *Why can't you use `datetime.now()` or `time.sleep()` directly inside a Temporal workflow function?*
+     - **Answer**: Standard system time and sleeps are non-deterministic. If a workflow runs `datetime.now()` during execution, it gets timestamp $T_1$. If the worker crashes and replays the code 5 minutes later, `datetime.now()` would return timestamp $T_2$, breaking the replay state machine. Instead, workflows must use `workflow.now()` and `workflow.wait_condition` (or `asyncio.sleep` under Temporal's patched event loop), which are tied to the deterministic event history clock.
+- **Why Temporal Over Simple Async Loops / Cron**:
+  - Simple `asyncio.sleep()` loops live in process memory; any pod deployment, OOM kill, or container restart terminates the sleep timer and silently drops the incident escalation ladder.
+  - Cron/database polling approaches require writing custom polling daemons, lease management, dead-letter queues, and locking to prevent race conditions across distributed workers. Temporal provides durable timers, automatic activity retries with exponential backoff, worker failover, and workflow event logs out-of-the-box with zero custom queuing code.
 - **Failure Modes Prevented**:
-  - **Lost Escallations**: Prevents scenarios where an on-call engineer ignores a page, but the secondary on-call is never notified because the server handling the timeout restarted.
+  - **Lost Escalations**: Prevents scenarios where an on-call engineer ignores a page, but the secondary on-call is never notified because the server handling the timeout restarted.
   - **Duplicate LLM API Execution**: Wrapping the LLM call inside an activity ensures the expensive / rate-limited Gemini call is never executed twice for the same incident during a workflow worker crash.
+  - **Alert Storm Orchestration Duplication**: Temporal enforces single-workflow execution through unique workflow IDs (`id=f"incident-workflow-{incident_id}"`). If 50 alert webhooks hit the orchestrator for the same incident, Temporal rejects duplicate workflow creations at the cluster level, completely insulating the system from alert storms.
