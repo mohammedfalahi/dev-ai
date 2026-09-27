@@ -338,6 +338,15 @@ Use this format for later entries:
 - Risks: Automated CI runs require ephemeral pgvector container and Google GenAI API secrets in GitHub Actions.
 - Next: Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
 
+### 2026-09-27 — Fast-Brain Voice Loop with LiveKit Agents and Gemini Live (Milestone 23) Completed
+
+- State: PASS
+- Changes: `apps/voice/agent.py`, `tests/test_voice_agent.py`, `apps/orchestrator/workflow.py`, `packages/core/config.py`, `pyproject.toml`, `uv.lock`, `.context/architecture.md`, `.context/library-docs.md`, `.context/progress-tracker.md`
+- Verification: `uv run pytest tests/test_voice_agent.py -v` (10/10 passed), full suite `uv run pytest` (53/53 passed), `uv run ruff check apps/voice/ tests/test_voice_agent.py apps/orchestrator/ packages/core/` (all passed), `uv run mypy apps/voice/ tests/test_voice_agent.py apps/orchestrator/ packages/core/` (clean).
+- Metrics: Native bidirectional audio streaming configured via `livekit-plugins-google` (`gemini-live-2.5-flash-native-audio`). Precomputed ICO spoken brief delivered on connect. Deterministic tool calling intercepts all remediation commands with strict runbook grounding and Tier 1 / Tier 2 policy gating before signaling Temporal (`execute_action_signal`).
+- Risks: Realtime WebRTC audio requires live LiveKit server and Gemini Multimodal Live API quota in production PSTN/SIP deployments; offline simulation and unit test coverage validated locally.
+- Next: Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
+
 ## 11. Current next action
 
 Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).

@@ -19,6 +19,7 @@ class IncidentLifecycleWorkflow:
         self._status = "PENDING"
         self._acknowledged_by: str | None = None
         self._is_acknowledged = False
+        self._actions: list[dict[str, Any]] = []
 
     @workflow.signal
     async def acknowledge_incident(self, engineer_id: str) -> None:
@@ -30,6 +31,14 @@ class IncidentLifecycleWorkflow:
         self._acknowledged_by = engineer_id
         self._status = "ACKNOWLEDGED"
 
+    @workflow.signal
+    async def execute_action_signal(self, action_payload: dict[str, Any]) -> None:
+        """
+        Signal received when a policy-approved remediation or diagnostic action
+        is dispatched from the voice agent or console.
+        """
+        self._actions.append(action_payload)
+
     @workflow.query
     def get_status(self) -> dict[str, Any]:
         """
@@ -38,6 +47,7 @@ class IncidentLifecycleWorkflow:
         return {
             "status": self._status,
             "acknowledged_by": self._acknowledged_by,
+            "actions": self._actions,
         }
 
     @workflow.run

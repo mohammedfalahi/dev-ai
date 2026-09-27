@@ -21,10 +21,10 @@ def wait_for_postgres(conn_info: str, max_retries: int = 30, delay: float = 1.0)
             conn = psycopg.connect(conn_info, autocommit=True)
             print(f"Successfully connected to PostgreSQL (attempt {attempt}).")
             return conn
-        except psycopg.OperationalError as e:
+        except psycopg.OperationalError:
             if attempt == max_retries:
                 print(f"Failed to connect to PostgreSQL after {max_retries} attempts.")
-                raise e
+                raise
             print(f"PostgreSQL not ready yet (attempt {attempt}/{max_retries}). Retrying in {delay}s...")
             time.sleep(delay)
     raise RuntimeError("Could not connect to PostgreSQL.")
@@ -103,6 +103,6 @@ if __name__ == "__main__":
     try:
         run_migrations()
         print("\nAll migrations executed and verified successfully.")
-    except Exception as err:
+    except Exception as err:  # noqa: BLE001
         print(f"\nMigration failed: {err}", file=sys.stderr)
         sys.exit(1)

@@ -42,12 +42,9 @@ async def validate_grounding_activity(ico_dict: dict[str, Any]) -> bool:
         brief = ico.to_voice_brief()
 
         # We mainly want to ensure the generated voice brief doesn't contain markdown or json
-        if not GroundingValidator.validate_voice_brief(brief, ico):
-            span.update(output={"is_valid": False})
-            return False
-
-        span.update(output={"is_valid": True, "brief_length": len(brief)})
-        return True
+        is_valid = GroundingValidator.validate_voice_brief(brief, ico)
+        span.update(output={"is_valid": is_valid, "brief_length": len(brief) if is_valid else 0})
+        return is_valid
 
 
 @activity.defn

@@ -19,9 +19,14 @@ class Settings(BaseSettings):
     investigator_llm_model: str = "gemini-3.5-flash-lite"
     voice_agent_llm_model: str = "gemini-3.5-flash-lite"
     
-    # Voice Pipeline Providers
+    # Voice Pipeline Providers (Cascaded Legacy & LiveKit Gemini Live)
     stt_provider: str = "deepgram"
     tts_provider: str = "google-tts"
+    livekit_url: str = "ws://localhost:7880"
+    livekit_api_key: str = "devkey"
+    livekit_api_secret: str = "secret"
+    gemini_live_model: str = "gemini-live-2.5-flash-native-audio"
+    gemini_live_voice: str = "Puck"
 
     # Gateway & Ingest Configuration
     hmac_secret: str = "dev-secret-key-1234"

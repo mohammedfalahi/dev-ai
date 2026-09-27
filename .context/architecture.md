@@ -369,34 +369,39 @@ Use Qdrant only when measured corpus scale or query performance justifies a sepa
 
 ## 12. Voice architecture
 
-### First production mode
+### Fast-Brain Voice Loop (LiveKit Agents + Gemini Live Native Audio)
 
-Use a cascaded pipeline:
+The voice architecture implements speech-to-speech interaction using LiveKit Agents and the Gemini Live Multimodal Realtime API:
 
 ```text
 PSTN/SIP audio
-  → LiveKit room
-  → noise cancellation
-  → Silero VAD + semantic turn detector
-  → streaming Deepgram STT
-  → fast text LLM with ICO and bounded tools
-  → grounding/claim validator
-  → streaming Cartesia or Deepgram TTS
-  → PSTN/SIP audio
+  → LiveKit Room
+  → LiveKit Agents Worker
+  → Gemini Live Realtime Model (`gemini-live-2.5-flash-native-audio` via `livekit-plugins-google`)
+  → Injected system instruction containing pre-computed ICO & candidate runbooks
+  → Native low-latency bidirectional audio stream
+  → Deterministic Tool Calling (`execute_remediation_command`)
+      ↳ GroundingValidator.validate_action (runbook chunk matching)
+      ↳ Policy Engine (Tier 1 Read-only vs. Tier 2 Mutating)
+      ↳ Spoken Confirmation Handshake ('GO' / 'confirm')
+      ↳ Temporal Workflow Signal (`IncidentLifecycleWorkflow.execute_action_signal`)
+  → Spoken brief delivered from pre-computed ICO upon connection
+  → LiveKit WebRTC / SIP audio to on-call engineer
 ```
 
-Speech-to-speech may be explored later behind a feature flag, but cannot bypass text inspection or approval controls.
+Speech-to-speech operates with native audio input/output, but CANNOT bypass deterministic grounding or action policy:
+- Spoken facts must ground strictly in the pre-computed Incident Context Object (ICO).
+- Systems and details not present in the ICO are refused ("I don't have information on that.").
+- Remediations cannot be hallucinated: tool calling routes every candidate command through `GroundingValidator.validate_action` and `classify_command`.
+- Mutating actions (Tier 2) are strictly blocked without an explicit confirmation keyword (`GO` or `confirm`) before signaling Temporal.
 
 ### Latency budget
 
 | Stage | Target |
 | --- | ---: |
 | SIP/RTP and network | 50–120 ms |
-| End-of-turn detection | 200–400 ms |
-| STT finalization | 80–150 ms |
-| LLM time to first token | 250–450 ms |
-| TTS time to first byte | 80–150 ms |
-| Perceived response | p50 ≤800 ms; p95 <1 s |
+| Gemini Live Time to First Audio | 250–450 ms |
+| Perceived conversational response | p50 ≤800 ms; p95 <1 s |
 
 Budgets overlap through streaming. The system starts TTS on a validated first sentence while later text is still generated. It caps normal spoken responses at roughly two sentences and offers more detail.
 
@@ -693,7 +698,7 @@ Create a full ADR when changing any item below. Current decisions:
 | ID | Decision | Status |
 | --- | --- | --- |
 | ADR-001 | Two-stage Investigator then Voice architecture | Accepted |
-| ADR-002 | Cascaded STT → text LLM → TTS for first production mode | Accepted |
+| ADR-002 | Cascaded STT → text LLM → TTS for first production mode | Superseded by ADR-015 |
 | ADR-003 | Temporal owns one durable workflow per incident | Accepted |
 | ADR-004 | Postgres + pgvector is the initial system of record and vector store | Accepted |
 | ADR-005 | Hybrid FTS + vector retrieval, RRF, then reranking | Accepted |
@@ -702,6 +707,7 @@ Create a full ADR when changing any item below. Current decisions:
 | ADR-008 | Voice integration waits for investigation and retrieval quality gates | Accepted |
 | ADR-009 | Provider SDKs stay behind internal ports | Accepted |
 | ADR-010 | Responder deploys outside the monitored primary failure domain | Accepted |
+| ADR-015 | LiveKit Agents with Gemini Live Native Audio (Speech-to-Speech) | Accepted |
 
 ## 22. Architecture change checklist
 

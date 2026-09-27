@@ -52,7 +52,8 @@ The `Verified version` column remains `TBD` until implementation pins and checks
 | Cache/bus | Redis Streams **or** NATS JetStream | TBD | https://redis.io/docs/latest/develop/data-types/streams/ / https://docs.nats.io/nats-concepts/jetstream | Event/cache port | W0 |
 | Investigator framework | Pydantic AI **or** OpenAI Agents SDK | TBD | https://ai.pydantic.dev/ / https://openai.github.io/openai-agents-python/ | Investigator runner port | W2 |
 | Tool protocol | MCP | TBD | https://modelcontextprotocol.io/ | Tool adapter boundary | W2 |
-| Voice runtime | LiveKit Agents | TBD | https://docs.livekit.io/agents/ | `apps/voice` | W6 |
+| Voice runtime | LiveKit Agents | 1.8.3 | https://docs.livekit.io/agents/ | `apps/voice` | W6, M23 |
+| Speech-to-Speech Realtime | LiveKit Google Realtime Plugin (`gemini-live-2.5-flash-native-audio`) | 1.8.3 | https://github.com/livekit/agents/tree/main/livekit-plugins/livekit-plugins-google | `apps/voice` | M23 |
 | Telephony | LiveKit SIP | TBD | https://docs.livekit.io/telephony/ | Telephony port | W7 |
 | Outbound call setup | LiveKit outbound trunk | TBD | https://docs.livekit.io/telephony/making-calls/outbound-trunk | Telephony adapter | W7 |
 | SIP carrier | Twilio Elastic SIP Trunking | TBD | https://www.twilio.com/docs/sip-trunking | Carrier adapter/config | W7 |
