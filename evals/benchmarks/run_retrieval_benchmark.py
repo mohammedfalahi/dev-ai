@@ -9,6 +9,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from evals.schemas import GoldenEvalCase
 from packages.knowledge.hybrid_search import search_runbooks
+from packages.observability import flush_tracing, record_score, trace_span
 
 DEFAULT_DATASET = Path("evals/datasets/golden_dataset.jsonl")
 
@@ -48,6 +49,7 @@ class BenchmarkScorecard:
 def evaluate_retrieval(
     dataset_path: str | Path = DEFAULT_DATASET,
     top_k: int = 5,
+    limit: int | None = None,
 ) -> BenchmarkScorecard:
     """
     Execute 100% deterministic, pure-Python retrieval evaluation against a dataset.
@@ -63,95 +65,123 @@ def evaluate_retrieval(
         if stripped:
             cases.append(GoldenEvalCase.model_validate_json(stripped))
 
-    scorecard = BenchmarkScorecard(total_cases=len(cases))
+    if limit is not None and limit > 0:
+        cases = cases[:limit]
 
-    actionable_recalls_1: list[float] = []
-    actionable_recalls_3: list[float] = []
-    actionable_recalls_5: list[float] = []
-    actionable_rrs: list[float] = []
-    actionable_hard_negs: list[bool] = []
-    refusal_outcomes: list[bool] = []
+    with trace_span(
+        name="benchmark:retrieval_evaluation",
+        as_type="evaluator",
+        input={"total_cases": len(cases), "dataset_path": str(dataset_path), "top_k": top_k},
+    ) as eval_span:
+        scorecard = BenchmarkScorecard(total_cases=len(cases))
 
-    for case in cases:
-        results = search_runbooks(case.incident_query, top_k=top_k)
+        actionable_recalls_1: list[float] = []
+        actionable_recalls_3: list[float] = []
+        actionable_recalls_5: list[float] = []
+        actionable_rrs: list[float] = []
+        actionable_hard_negs: list[bool] = []
+        refusal_outcomes: list[bool] = []
 
-        top_chunk = results[0].chunk_id if results else None
-        top_score = results[0].rerank_score if results else None
+        for case in cases:
+            results = search_runbooks(case.incident_query, top_k=top_k)
 
-        metric = CaseMetric(
-            case_id=case.case_id,
-            category=case.category,
-            query=case.incident_query,
-            should_refuse=case.should_refuse,
-            top_chunk=top_chunk,
-            top_rerank_score=top_score,
-        )
+            top_chunk = results[0].chunk_id if results else None
+            top_score = results[0].rerank_score if results else None
 
-        if case.should_refuse:
-            scorecard.refusal_cases += 1
-            # Expected empty results on out-of-domain or unanswerable queries
-            refused = len(results) == 0
-            metric.refusal_ok = refused
-            refusal_outcomes.append(refused)
-            # Refusal cases trivially pass hard-negative check if empty
-            metric.hard_negative_ok = True
-        else:
-            scorecard.actionable_cases += 1
+            metric = CaseMetric(
+                case_id=case.case_id,
+                category=case.category,
+                query=case.incident_query,
+                should_refuse=case.should_refuse,
+                top_chunk=top_chunk,
+                top_rerank_score=top_score,
+            )
 
-            # Check if any negative chunk appeared at Rank 1
-            if top_chunk and top_chunk in case.negative_chunk_ids:
-                metric.hard_negative_ok = False
-                scorecard.hard_negatives_at_rank_1 += 1
-            else:
+            if case.should_refuse:
+                scorecard.refusal_cases += 1
+                # Expected empty results on out-of-domain or unanswerable queries
+                refused = len(results) == 0
+                metric.refusal_ok = refused
+                refusal_outcomes.append(refused)
+                # Refusal cases trivially pass hard-negative check if empty
                 metric.hard_negative_ok = True
-            actionable_hard_negs.append(metric.hard_negative_ok)
-
-            # Determine rank of first matching expected chunk
-            hit_rank = None
-            for idx, res in enumerate(results, start=1):
-                if res.chunk_id in case.expected_chunk_ids:
-                    hit_rank = idx
-                    break
-
-            metric.hit_rank = hit_rank
-            if hit_rank is not None:
-                rr = 1.0 / hit_rank
-                rec_1 = 1.0 if hit_rank <= 1 else 0.0
-                rec_3 = 1.0 if hit_rank <= 3 else 0.0
-                rec_5 = 1.0 if hit_rank <= 5 else 0.0
             else:
-                rr = 0.0
-                rec_1 = 0.0
-                rec_3 = 0.0
-                rec_5 = 0.0
+                scorecard.actionable_cases += 1
 
-            metric.reciprocal_rank = rr
-            metric.recall_at_1 = rec_1
-            metric.recall_at_3 = rec_3
-            metric.recall_at_5 = rec_5
+                # Check if any negative chunk appeared at Rank 1
+                if top_chunk and top_chunk in case.negative_chunk_ids:
+                    metric.hard_negative_ok = False
+                    scorecard.hard_negatives_at_rank_1 += 1
+                else:
+                    metric.hard_negative_ok = True
+                actionable_hard_negs.append(metric.hard_negative_ok)
 
-            actionable_rrs.append(rr)
-            actionable_recalls_1.append(rec_1)
-            actionable_recalls_3.append(rec_3)
-            actionable_recalls_5.append(rec_5)
+                # Determine rank of first matching expected chunk
+                hit_rank = None
+                for idx, res in enumerate(results, start=1):
+                    if res.chunk_id in case.expected_chunk_ids:
+                        hit_rank = idx
+                        break
 
-        scorecard.case_metrics.append(metric)
+                metric.hit_rank = hit_rank
+                if hit_rank is not None:
+                    rr = 1.0 / hit_rank
+                    rec_1 = 1.0 if hit_rank <= 1 else 0.0
+                    rec_3 = 1.0 if hit_rank <= 3 else 0.0
+                    rec_5 = 1.0 if hit_rank <= 5 else 0.0
+                else:
+                    rr = 0.0
+                    rec_1 = 0.0
+                    rec_3 = 0.0
+                    rec_5 = 0.0
 
-    if actionable_rrs:
-        scorecard.mrr = sum(actionable_rrs) / len(actionable_rrs)
-        scorecard.recall_at_1 = sum(actionable_recalls_1) / len(actionable_recalls_1)
-        scorecard.recall_at_3 = sum(actionable_recalls_3) / len(actionable_recalls_3)
-        scorecard.recall_at_5 = sum(actionable_recalls_5) / len(actionable_recalls_5)
-        scorecard.hard_negative_pass_rate = sum(
-            1.0 for ok in actionable_hard_negs if ok
-        ) / len(actionable_hard_negs)
+                metric.reciprocal_rank = rr
+                metric.recall_at_1 = rec_1
+                metric.recall_at_3 = rec_3
+                metric.recall_at_5 = rec_5
 
-    if refusal_outcomes:
-        scorecard.refusal_precision = sum(1.0 for ok in refusal_outcomes if ok) / len(
-            refusal_outcomes
+                actionable_rrs.append(rr)
+                actionable_recalls_1.append(rec_1)
+                actionable_recalls_3.append(rec_3)
+                actionable_recalls_5.append(rec_5)
+
+            scorecard.case_metrics.append(metric)
+
+        if actionable_rrs:
+            scorecard.mrr = sum(actionable_rrs) / len(actionable_rrs)
+            scorecard.recall_at_1 = sum(actionable_recalls_1) / len(actionable_recalls_1)
+            scorecard.recall_at_3 = sum(actionable_recalls_3) / len(actionable_recalls_3)
+            scorecard.recall_at_5 = sum(actionable_recalls_5) / len(actionable_recalls_5)
+            scorecard.hard_negative_pass_rate = sum(
+                1.0 for ok in actionable_hard_negs if ok
+            ) / len(actionable_hard_negs)
+
+        if refusal_outcomes:
+            scorecard.refusal_precision = sum(1.0 for ok in refusal_outcomes if ok) / len(
+                refusal_outcomes
+            )
+        else:
+            scorecard.refusal_precision = 1.0
+
+        eval_span.update(
+            output={
+                "recall_at_1": scorecard.recall_at_1,
+                "recall_at_3": scorecard.recall_at_3,
+                "recall_at_5": scorecard.recall_at_5,
+                "mrr": scorecard.mrr,
+                "refusal_precision": scorecard.refusal_precision,
+                "hard_negative_pass_rate": scorecard.hard_negative_pass_rate,
+            }
         )
-    else:
-        scorecard.refusal_precision = 1.0
+        record_score(name="retrieval_recall_at_1", value=scorecard.recall_at_1)
+        record_score(name="retrieval_recall_at_3", value=scorecard.recall_at_3)
+        record_score(name="retrieval_recall_at_5", value=scorecard.recall_at_5)
+        record_score(name="retrieval_mrr", value=scorecard.mrr)
+        record_score(name="retrieval_refusal_precision", value=scorecard.refusal_precision)
+        record_score(
+            name="retrieval_hard_negative_pass_rate",
+            value=scorecard.hard_negative_pass_rate,
+        )
 
     return scorecard
 
@@ -245,6 +275,7 @@ def print_executive_report(scorecard: BenchmarkScorecard) -> None:
 def main() -> None:
     scorecard = evaluate_retrieval()
     print_executive_report(scorecard)
+    flush_tracing()
 
     # Check exit condition against quality gates
     if (

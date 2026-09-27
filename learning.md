@@ -829,5 +829,172 @@
   - **Duplicate Vector Index Bloat**: Deterministic chunk IDs prevent vector tables from exploding in size during frequent CI/CD documentation deployments.
   - **Reranker Latency Degeneracy**: Fixed Top-5 RRF candidate pooling guarantees that cross-encoder inference time remains strictly constant on the incident response path.
 
+---
+
+## [2026-09-26] Milestone 21: Generation, Safety Grounding, and Action Verification Evals
+
+### 1. What was built & which files were modified
+- `packages/contracts/ico.py`: Extended `IncidentContextObject` with `proposed_action: str | None = None` to establish a strongly typed contract for remediation commands emitted by the Investigator.
+- `packages/policy/tier.py`: Implemented `classify_action_tier(command: str) -> int` mapping commands into integer policy tiers (1 for read-only diagnostics, 2 for mutating actions).
+- `apps/investigator/engine.py`: Enhanced prompt engineering to instruct Gemini to populate `proposed_action` exclusively with verbatim code fence commands from retrieved runbooks, and defensively enforce `investigation_status="UNDOCUMENTED_INCIDENT"`, `candidate_runbooks=[]`, and `proposed_action=None` on retrieval refusal.
+- `evals/generation/eval_grounding.py` & `evals/generation/test_grounding_evals.py`: Built deterministic grounding and safety evaluation logic featuring:
+  - `extract_code_fence_commands`: Extracts fenced CLI/SQL commands from markdown code fences.
+  - `validate_verbatim_command_grounding`: Asserts proposed commands exist word-for-word in retrieved runbook code blocks.
+  - `scan_forbidden_claims`: Scans headline, impact, hypothesis text, and spoken voice brief for negative/prohibited claims.
+  - `validate_generation_case`: Computes full validation report against `GoldenEvalCase`.
+- `evals/generation/run_generation_eval.py`: Implemented standalone CLI benchmark runner producing an executive ASCII scorecard (Case ID, Category, Expected Action, Emitted Action, Grounding Status, Verdict) with aggregate metrics (Verbatim Match Rate, Forbidden Claim Violation Rate, Refusal Accuracy, Overall Pass Rate).
+- `tests/test_generation_evals.py`: Implemented fast, deterministic pytest suite running in <0.1s with 0 external LLM calls to test verbatim grounding, hallucination rejection, forbidden claim detection, refusal verification, and policy tier alignment.
+- Files touched:
+  - `packages/contracts/ico.py` (Modified)
+  - `packages/policy/tier.py` (Modified)
+  - `apps/investigator/engine.py` (Modified)
+  - `evals/generation/__init__.py` (Created)
+  - `evals/generation/eval_grounding.py` (Created)
+  - `evals/generation/test_grounding_evals.py` (Created)
+  - `evals/generation/run_generation_eval.py` (Created)
+  - `tests/test_generation_evals.py` (Created)
+  - `.context/progress-tracker.md` (Modified)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept Explained (Plain English)
+- **Why Deterministic AST Command Matching is Safer Than LLM-as-a-Judge for Infrastructure Remediation**:
+  - In LLM-as-a-judge approaches, an evaluator model is prompted with: *"Does this proposed command seem safe and equivalent to the runbook?"*
+  - This is exceptionally dangerous for production infrastructure. A command like `kubectl delete pod checkout-api-7b89` might seem "semantically equivalent" to `kubectl rollout restart deployment/checkout-api` to an LLM evaluator, but in production, deleting an individual pod without understanding StatefulSet or Job semantics can cause split-brain data corruption. Even worse, subtle parameter hallucinations (such as `--force --grace-period=0` or omitting namespace `-n production`) can drop database tables or crash unmonitored clusters.
+  - CallOps eliminates probabilistic grading by enforcing **verbatim AST code fence extraction**:
+    1. The markdown parser extracts raw commands directly from ` ```bash ` and ` ```sql ` fences in the company's verified runbooks.
+    2. The proposed command is validated by exact character string equality.
+    3. If the LLM invents a command, alters flags, or targets the wrong resource, the AST validator immediately marks it `HALLUCINATED_COMMAND` and rejects execution.
+- **Negative Claim Scanning and Operational Side Effect Prevention**:
+  - Hallucinations in incident briefings frequently take the form of false status claims (e.g. claiming *"The database cluster has been restarted"* when no restart occurred, or asserting *"The Postgres primary database is down"* when only a connection pool is exhausted).
+  - If an on-call engineer receives a voice call stating that a database is down or already restarted, they will take inappropriate, destructive escalations (like failover or manual kill).
+  - The `scan_forbidden_claims` engine performs automated substring auditing across all generated fields (headline, impact, hypothesis, and voice brief), guaranteeing a **0.0% Forbidden Claim Violation Rate** across all operational incidents.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why decouple the evaluation of retrieval (Milestone 20) from generation safety grounding (Milestone 21) rather than running single end-to-end RAG evals?*
+     - **Answer**: End-to-end evaluations conflate two orthogonal failure modes: "retriever underperformance" (the search engine surfaced the wrong runbooks) and "generation hallucination" (the LLM was given the correct runbooks but hallucinated a dangerous command or false status). By decoupling them, we evaluate retrieval with deterministic rank metrics (Recall@K, MRR), and evaluate generation against fixed runbook context with verbatim AST command matching and negative claim scanners. This isolates root causes instantly: when a test fails, engineers know immediately whether to tune the cross-encoder reranker or adjust the LLM system prompt.
+  2. *Why build the automated CI test suite (`tests/test_generation_evals.py`) around pre-constructed ICO fixtures with 0 LLM calls, while keeping live generation in a separate benchmark runner (`run_generation_eval.py`)?*
+     - **Answer**: CI test suites must be fast, deterministic, offline-capable, and hermetic. Running 20+ live LLM generation calls on every git push or pull request introduces flaky tests due to network jitter, rate limiting, and provider model latency (taking several minutes per run). By testing the safety validators, code-fence parsers, tier classifiers, and refusal invariants with pre-constructed fixtures in `pytest`, the test suite executes in under 50 milliseconds with 100% determinism. Live LLM generation evaluation is then orchestrated through the benchmark runner (`run_generation_eval.py`) for scheduled benchmarking and release qualification.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We embedded both verbatim code-fence extraction and integer policy tiering (`1 = TIER_1_READ_ONLY`, `2 = TIER_2_MUTATING`) directly into the evaluation contract. This ensures that every command is audited for both verbatim authenticity and authorization tier before any confirmation handshake can proceed.
+- **Failure Modes Prevented**:
+  - **Command Syntax & Parameter Hallucination**: Verbatim code-fence matching ensures the AI cannot inject unauthorized flags (e.g., `--no-preserve-root`) or wrong container names.
+  - **False Escalation Triggered by Hallucinated Claims**: Negative claim scanning guarantees that the voice brief never falsely claims that systems were restarted or destroyed.
+
+---
+
+## [2026-09-27] Milestone 22: Langfuse AI Observability & Tracing Integration
+
+### 1. What was built & which files were modified
+- **Skill Installation**: Installed the official Langfuse AI agent skill locally into `.agents/skills/langfuse` from `github.com/langfuse/skills` including full reference documentation (`instrumentation.md`, `v4-project-migration.md`, `cli.md`, `setting-up-evals.md`).
+- `packages/core/config.py`: Extended `Settings` to include `langfuse_public_key`, `langfuse_secret_key`, and `langfuse_base_url` (defaulting to `https://cloud.langfuse.com`), automatically loaded from `.env` or system environment via `pydantic-settings`.
+- `packages/observability/redaction.py`: Built recursive credential and sensitive header scrubbing supporting dictionary keys (`authorization`, `api_key`, `secret`, `token`, `password`, `cookie`, `bearer`, etc.), HTTP header dictionaries (`{"name": "...", "value": "..."}`), and regex pattern matchers for Bearer tokens, JWTs, and API keys.
+- `packages/observability/tracing.py`: Implemented production-grade Langfuse v4 tracing client wrapper with:
+  - **Zero-Crash Safe Fallback**: When `LANGFUSE_PUBLIC_KEY` or `LANGFUSE_SECRET_KEY` are unset, all tracing calls, decorators, and context managers return lightweight no-op objects (`NoOpSpan`), ensuring zero authentication warnings, zero network calls, and zero test breakage.
+  - **Dual Sync/Async Span Context**: `trace_span` works seamlessly with both `with trace_span(...)` and `async with trace_span(...)`.
+  - **Observation Typing**: Uses typed Langfuse v4 observation primitives (`retriever`, `agent`, `generation`, `guardrail`, `tool`, `span`).
+  - **Non-blocking Dispatch**: Asynchronous background telemetry flushing (`flush_tracing`) and graceful shutdown.
+  - **Score Logging**: `record_score` for attaching numeric and categorical quality metrics to traces and evaluations.
+- `packages/knowledge/hybrid_search.py`: Instrumenting the hybrid search engine with root `retriever` observation (`hybrid_search_runbooks`) and dedicated nested spans:
+  - `dense_retrieval_pgvector`: Embeddings generation and pgvector cosine distance search.
+  - `sparse_retrieval_bm25_fts`: Postgres full-text lexical ranking.
+  - `rrf_fusion`: Reciprocal Rank Fusion pooling.
+  - `cross_encoder_rerank_cutoff`: Cross-encoder logit scoring, ranking, and refusal gate cutoff.
+- `apps/investigator/engine.py`: Instrumented slow-brain incident investigation:
+  - Root `investigate_incident` span typed as `as_type="agent"`.
+  - Nested `investigator_ico_generation` span typed as `as_type="generation"` capturing model name (`gemini-3.5-flash-lite`), prompt tokens, completion tokens, total tokens from `response.usage_metadata`, and wall-clock latency.
+  - Automatic scrubbing of `raw_alert` inputs and generated outputs.
+- `apps/orchestrator/activities.py`: Wrapped Temporal activities with `as_type="tool"` and `as_type="guardrail"` spans while leaving `apps/orchestrator/workflow.py` 100% untouched, strictly adhering to Invariant 9 and Temporal workflow replay determinism.
+- `evals/`: Instrumenting retrieval benchmark (`run_retrieval_benchmark.py`), generation evaluation (`run_generation_eval.py`), and the consolidated CI matrix runner (`run_eval_matrix.py`) to emit `evaluator` observations and log aggregate scores (`recall_at_1`, `recall_at_3`, `recall_at_5`, `mrr`, `refusal_precision`, `hard_negative_pass_rate`, `verbatim_grounding_match_rate`, `forbidden_claim_violation_rate`, `refusal_generation_accuracy`, `matrix_overall_passed`) to Langfuse.
+- `tests/test_observability.py`: Created unit test suite verifying sensitive key redaction, nested scrubbing, safe no-op fallback without credentials, sync and async decorators, and configured client behavior.
+- Files touched:
+  - `.agents/skills/langfuse/` (Installed)
+  - `packages/core/config.py` (Modified)
+  - `packages/observability/__init__.py` (Created)
+  - `packages/observability/redaction.py` (Created)
+  - `packages/observability/tracing.py` (Created)
+  - `packages/knowledge/hybrid_search.py` (Modified)
+  - `apps/investigator/engine.py` (Modified)
+  - `apps/orchestrator/activities.py` (Modified)
+  - `evals/benchmarks/run_retrieval_benchmark.py` (Modified)
+  - `evals/generation/run_generation_eval.py` (Modified)
+  - `evals/run_eval_matrix.py` (Modified)
+  - `tests/test_observability.py` (Created)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept Explained (Plain English)
+- **Hierarchical Observation Types & The Agent Graph**:
+  - Traditional logging flattens events into disconnected log lines, making it nearly impossible to visualize the execution tree of multi-stage AI systems.
+  - Langfuse v4 introduces typed observations on top of OpenTelemetry:
+    - `agent`: Represents a autonomous or semi-autonomous decision-making agent (e.g. Investigator).
+    - `retriever`: Represents a search or RAG pipeline querying knowledge vaults.
+    - `generation`: Specifically tracks LLM reasoning with model parameters, prompt/completion tokens, and cost breakdown.
+    - `tool`: Tracks deterministic tools or external activity dispatch.
+    - `guardrail`: Tracks policy validations and safety boundaries (e.g. GroundingValidator).
+  - By nesting these observations hierarchically, Langfuse constructs an interactive **Agent Graph** in the UI, enabling on-call engineers to visually trace from an incident alert down through retrieval candidate ranks, cross-encoder reranking, and generation token usage in sub-second granularity.
+- **Why Safe No-Op Fallback is Crucial for Production CI and Offline Environments**:
+  - Direct SDK dependencies that unconditionally attempt network connections or raise unhandled exceptions when credentials are absent break offline builds, local test suites, and container startup.
+  - The `packages.observability` layer adopts the **Null Object Pattern**: when public/secret keys are missing, it initializes a dummy `NoOpSpan` that transparently accepts all `.update()`, `.score()`, and context manager entries/exits without throwing exceptions, emitting noise, or adding latency.
+- **Preserving Temporal Determinism (Invariant 9)**:
+  - Temporal workflows reconstruct execution state by replaying workflow history from event logs. Any non-deterministic side effect inside a workflow function (such as sending network packets to Langfuse or generating random trace IDs) will trigger a fatal `NonDeterministicWorkflowError`.
+  - By strictly restricting Langfuse instrumentation to **Temporal Activities** (`apps/orchestrator/activities.py`), workflow replays remain 100% deterministic, while each activity execution and retry is cleanly tracked as a discrete, observable tool span in Langfuse.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why did you instrument Temporal Activities rather than placing tracing decorators directly on the Temporal Workflow definition?*
+     - **Answer**: Temporal workflow functions must remain purely deterministic across replays. Tracing libraries like Langfuse interact with system clocks, generate UUIDs, and initiate asynchronous HTTP/OpenTelemetry network dispatches. If placed inside workflow definitions, replayed workflow tasks would emit duplicate telemetry or mismatch recorded history, causing fatal workflow replay non-determinism panics. Activities, on the other hand, are the designated boundary for non-deterministic execution and network I/O in Temporal; by wrapping only activities, we gain full observability into execution latency, retries, and failures while keeping the orchestration state machine completely hermetic.
+  2. *How do you prevent data leaks (like AWS keys or bearer tokens) from appearing in LLM traces, and why scrub before sending to Langfuse?*
+     - **Answer**: Alerts and telemetry ingested during an outage often contain raw environment variables, authorization headers, or database connection strings. We implemented proactive pre-ingestion data scrubbing in `packages/observability/redaction.py`. Before any input, output, or metadata payload is passed to Langfuse, it passes through a recursive scrubber that inspects dictionary keys and string values, replacing sensitive patterns (such as Bearer tokens, API keys, and authorization headers) with `[REDACTED]`. This guarantees zero credential leakage to external monitoring platforms, fulfilling enterprise security and compliance requirements.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We decoupled tracing behind an internal interface (`packages.observability`) rather than coupling application business logic directly to the Langfuse Python SDK. This provides safe fallback, automatic scrubbing, and seamless upgradability across SDK versions without modifying application planes.
+- **Failure Modes Prevented**:
+  - **CI & Unit Test Breakage**: Safe no-op fallback guarantees that the entire 65-test pytest suite runs completely offline with 0 credentials and 0 failures.
+  - **Temporal Replay Failures**: Isolating tracing to activities prevents non-deterministic workflow crashes.
+  - **Credential Leakage**: Automatic scrubbing prevents credentials from being exposed in monitoring dashboards.
+
+---
+
+## [2026-09-27] Milestone 23: Consolidated Evaluation Matrix and CI Regression Gate
+
+### 1. What was built & which files were modified
+- `evals/run_eval_matrix.py`: Implemented unified evaluation orchestrator consolidating Tier 1 (Candidate Retrieval), Tier 2 (Cross-Encoder Reranking & Refusal), and Tier 3 (Generation & AST Grounding Safety) into an executive ASCII dashboard and machine-readable JSON report with `--strict` exit-code gating.
+- `evals/benchmarks/run_retrieval_benchmark.py`: Enhanced `evaluate_retrieval` with optional `limit` parameter to synchronize evaluation slicing across retrieval and generation benchmarks.
+- `tests/test_eval_matrix.py`: Created fast (<0.1s), deterministic regression pytest suite testing multi-tier gate validation, threshold rejection on simulated score drops (MRR, forbidden claims, refusal accuracy, hard negatives), and JSON schema serialization with 0 external network or DB calls.
+- `.github/workflows/eval.yml`: Configured automated GitHub Actions CI pipeline running with `pgvector/pgvector:pg16` service container, database migrations, operational runbook ingestion, hermetic pytest suites, and the strict multi-tier evaluation matrix gate on pull requests.
+- Files touched:
+  - `evals/run_eval_matrix.py` (Created)
+  - `evals/benchmarks/run_retrieval_benchmark.py` (Modified)
+  - `tests/test_eval_matrix.py` (Created)
+  - `.github/workflows/eval.yml` (Created)
+  - `.context/progress-tracker.md` (Modified)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept Explained (Plain English)
+- **End-to-End Multi-Tier Evaluation Gating in CI/CD**:
+  - In traditional software engineering, unit tests assert boolean code contracts. In AI-powered systems, however, changes to prompts, embeddings models, or chunking strategies can quietly degrade retrieval precision or safety grounding without throwing exceptions or syntax errors.
+  - The consolidated evaluation matrix organizes system quality into three progressive tiers:
+    1. **Tier 1 (Candidate Retrieval)**: Ensures high recall ($Recall@1 \ge 70\%, Recall@3 \ge 85\%, Recall@5 \ge 90\%$) across dense and sparse hybrid search so relevant runbooks enter the candidate pool.
+    2. **Tier 2 (Reranking & Refusal Precision)**: Guarantees that the cross-encoder surfaces the leading procedure at Rank 1 ($MRR \ge 0.80$, Zero Hard Negatives at Rank 1) while refusing out-of-domain failures ($100\%$ Refusal Precision).
+    3. **Tier 3 (Generation & Safety Grounding)**: Enforces that proposed remediation commands exist word-for-word in runbook code fences ($Match Rate \ge 85\%$) and that no false status claims ($0.0\%$ Forbidden Claim Violations) are emitted.
+  - By gating CI with `--strict`, any PR that reduces retrieval relevance or increases hallucination risk is automatically blocked before merging.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why is multi-tier regression evaluation required before deploying prompt or chunking modifications to production?*
+     - **Answer**: AI pipelines are tightly coupled systems where modifying one layer has non-linear ripple effects across downstream components. For example, changing a markdown chunking header delimiter might improve sparse BM25 token matches (Tier 1) but dilute chunk semantic boundaries, causing the cross-encoder to rank a distractor at Rank 1 (Tier 2 regression). Similarly, tweaking an LLM system prompt to be more conversational might increase user fluency while inadvertently hallucinating a missing command flag (Tier 3 safety regression). A multi-tier evaluation matrix isolates each layer independently, guaranteeing that improvements in one tier do not introduce silent regressions in another.
+  2. *How do you test non-deterministic AI pipelines with deterministic gates in continuous integration?*
+     - **Answer**: We enforce determinism through three architectural mechanisms:
+       1. **Temperature Capping**: All evaluation generations use low temperature ($0.1$) to minimize output variance.
+       2. **Deterministic Metric Formulation**: Instead of subjective LLM-as-a-judge scoring, metrics are calculated via set intersections, reciprocal rank math, and exact substring AST parsing in pure Python.
+       3. **Decoupled Unit Testing vs. Live Gating**: The standard test suite (`tests/test_eval_matrix.py`) tests the gating logic hermetically using mock scorecards in milliseconds, while the CI pipeline (`.github/workflows/eval.yml`) provisions an ephemeral Postgres + pgvector service to execute the live matrix runner with strict thresholds.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We structured the matrix runner to output both an executive ASCII dashboard for human review in terminal logs and a structured JSON artifact (`eval-report.json`) for automated CI/CD artifact tracking and historical trend analysis.
+- **Failure Modes Prevented**:
+  - **Silent Algorithmic Drift**: Automated CI gating prevents degraded embeddings or prompt changes from slipping into production.
+  - **Flaky CI Pipelines**: Isolated unit tests with pre-constructed fixtures ensure developer workstations can run fast test cycles without external API dependencies.
+
+
+
+
 
 

@@ -1,4 +1,3 @@
-import asyncio
 from datetime import timedelta
 from typing import Any
 
@@ -7,10 +6,10 @@ from temporalio.exceptions import ApplicationError
 
 with workflow.unsafe.imports_passed_through():
     from apps.orchestrator.activities import (
-        investigate_incident_activity,
-        validate_grounding_activity,
-        notify_oncall_activity,
         dispatch_escalation_activity,
+        investigate_incident_activity,
+        notify_oncall_activity,
+        validate_grounding_activity,
     )
 
 
@@ -85,7 +84,7 @@ class IncidentLifecycleWorkflow:
                 lambda: self._is_acknowledged,
                 timeout=timedelta(seconds=90),
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Escalation Ladder
             self._status = "ESCALATING"
             await workflow.execute_activity(

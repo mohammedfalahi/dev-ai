@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     grouping_window_seconds: int = 60
     temporal_host: str = "localhost:7233"
 
+    # Observability & Langfuse Configuration
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 

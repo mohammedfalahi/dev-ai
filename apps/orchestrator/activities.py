@@ -1,8 +1,10 @@
 from typing import Any
+
 from temporalio import activity
 
 from apps.investigator.engine import investigate_incident
 from packages.contracts.ico import IncidentContextObject
+from packages.observability import scrub_sensitive_data, trace_span
 from packages.policy.grounding_validator import GroundingValidator
 
 
@@ -11,9 +13,18 @@ async def investigate_incident_activity(raw_alert: dict[str, Any]) -> dict[str, 
     """
     Executes the slow-brain investigation to generate an ICO.
     """
-    ico = await investigate_incident(raw_alert)
-    # Return as a serialized dict so Temporal can transparently encode it
-    return ico.model_dump(mode="json")
+    with trace_span(
+        name="activity:investigate_incident",
+        as_type="tool",
+        input=scrub_sensitive_data(raw_alert),
+        metadata={"activity": "investigate_incident_activity"},
+    ) as span:
+        ico = await investigate_incident(raw_alert)
+        dump = ico.model_dump(mode="json")
+        span.update(
+            output={"incident_id": ico.incident_id, "status": ico.investigation_status}
+        )
+        return dump
 
 
 @activity.defn
@@ -21,14 +32,22 @@ async def validate_grounding_activity(ico_dict: dict[str, Any]) -> bool:
     """
     Validates that the ICO passes safety formatting boundaries.
     """
-    ico = IncidentContextObject.model_validate(ico_dict)
-    brief = ico.to_voice_brief()
+    with trace_span(
+        name="activity:validate_grounding",
+        as_type="guardrail",
+        input={"incident_id": ico_dict.get("incident_id")},
+        metadata={"activity": "validate_grounding_activity"},
+    ) as span:
+        ico = IncidentContextObject.model_validate(ico_dict)
+        brief = ico.to_voice_brief()
 
-    # We mainly want to ensure the generated voice brief doesn't contain markdown or json
-    if not GroundingValidator.validate_voice_brief(brief, ico):
-        return False
+        # We mainly want to ensure the generated voice brief doesn't contain markdown or json
+        if not GroundingValidator.validate_voice_brief(brief, ico):
+            span.update(output={"is_valid": False})
+            return False
 
-    return True
+        span.update(output={"is_valid": True, "brief_length": len(brief)})
+        return True
 
 
 @activity.defn
@@ -36,8 +55,14 @@ async def notify_oncall_activity(incident_id: str, ico_dict: dict[str, Any]) -> 
     """
     Simulates dispatching the alert and initiating the Voice Agent call.
     """
-    # In a real setup, this would trigger Twilio/LiveKit SIP bridging.
-    activity.logger.info(f"Notification dispatched for incident: {incident_id}")
+    with trace_span(
+        name="activity:notify_oncall",
+        as_type="tool",
+        input={"incident_id": incident_id},
+        metadata={"activity": "notify_oncall_activity"},
+    ):
+        # In a real setup, this would trigger Twilio/LiveKit SIP bridging.
+        activity.logger.info(f"Notification dispatched for incident: {incident_id}")
 
 
 @activity.defn
@@ -47,4 +72,16 @@ async def dispatch_escalation_activity(
     """
     Dispatches an escalation step (e.g. paging the secondary on-call).
     """
-    activity.logger.info(f"ESCALATION [{escalation_level}] for {incident_id}: {reason}")
+    with trace_span(
+        name="activity:dispatch_escalation",
+        as_type="tool",
+        input={
+            "incident_id": incident_id,
+            "escalation_level": escalation_level,
+            "reason": reason,
+        },
+        metadata={"activity": "dispatch_escalation_activity"},
+    ):
+        activity.logger.info(
+            f"ESCALATION [{escalation_level}] for {incident_id}: {reason}"
+        )

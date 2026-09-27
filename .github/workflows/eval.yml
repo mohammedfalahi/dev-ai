@@ -1,0 +1,74 @@
+name: RAG Evaluation Matrix & CI Regression Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "data/generated/**"
+      - "packages/knowledge/**"
+      - "apps/investigator/**"
+      - "evals/**"
+      - ".github/workflows/eval.yml"
+
+jobs:
+  rag-evaluation:
+    name: Hybrid Retrieval & Grounding Evaluation Matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: dev
+          POSTGRES_PASSWORD: dev-password
+          POSTGRES_DB: dev_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://dev:dev-password@localhost:5432/dev_ai
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          version: "latest"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run Database Migrations
+        run: uv run python infra/run_migrations.py
+
+      - name: Ingest Operational Runbooks
+        run: uv run python packages/knowledge/ingest.py
+
+      - name: Run Fast Regression Unit & Contract Tests
+        run: uv run pytest tests/test_golden_dataset.py tests/test_retrieval_benchmarks.py tests/test_generation_evals.py tests/test_eval_matrix.py -v
+
+      - name: Execute Multi-Tier Evaluation Matrix & CI Regression Gate
+        run: uv run python evals/run_eval_matrix.py --strict --limit 5 --output-json eval-report.json
+
+      - name: Upload Evaluation Matrix Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-matrix-report
+          path: eval-report.json

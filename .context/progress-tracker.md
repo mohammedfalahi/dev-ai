@@ -320,6 +320,24 @@ Use this format for later entries:
 - Risks: Embeddings depend on Google GenAI API quota; local tests use running pgvector PostgreSQL container.
 - Next: Advance to Generation Groundedness and Faithfulness Benchmark (Milestone 21) or Week 7 Telephony/SIP.
 
+### 2026-09-26 — Generation, Safety Grounding, and Action Verification Evals (Milestone 21) Completed
+
+- State: PASS
+- Changes: `packages/contracts/ico.py`, `packages/policy/tier.py`, `apps/investigator/engine.py`, `evals/generation/__init__.py`, `evals/generation/eval_grounding.py`, `evals/generation/test_grounding_evals.py`, `evals/generation/run_generation_eval.py`, `tests/test_generation_evals.py`
+- Verification: `uv run python -m pytest tests/test_generation_evals.py -v` (6/6 passed in 0.04s), `uv run python evals/generation/run_generation_eval.py --limit 4` (all gates passed), `uv run ruff check evals/ packages/ apps/investigator/ tests/` (all passed), `uv run mypy evals/ packages/` (all passed).
+- Metrics: Verbatim Action Grounding Match Rate = 100%, Forbidden Claim Violation Rate = 0.0%, Refusal Generation Accuracy = 100%, Overall Grounding Pass Rate = 100%.
+- Risks: Live generation requires Google GenAI API access; fast CI test suite uses pre-constructed fixtures with 0 network calls.
+- Next: Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
+
+### 2026-09-27 — Consolidated Evaluation Matrix and CI Regression Gate (Milestone 22) Completed
+
+- State: PASS
+- Changes: `evals/run_eval_matrix.py`, `evals/benchmarks/run_retrieval_benchmark.py`, `tests/test_eval_matrix.py`, `.github/workflows/eval.yml`
+- Verification: `uv run python -m pytest tests/test_eval_matrix.py -v` (6/6 passed in 3.6s), `uv run python evals/run_eval_matrix.py --limit 5 --strict --output-json eval-report.json` (all gates passed, exit 0), `uv run ruff check evals/ tests/` (all passed), `uv run mypy evals/` (all passed).
+- Metrics: All Tier 1, Tier 2, and Tier 3 quality gates verified (Recall@1=100%, Recall@3=100%, Recall@5=100%, MRR=1.0000, Refusal Precision=100%, Hard Negatives=0, Verbatim AST Match=100%, Forbidden Violations=0.0%, Refusal Accuracy=100%, Overall Pass Rate=100%).
+- Risks: Automated CI runs require ephemeral pgvector container and Google GenAI API secrets in GitHub Actions.
+- Next: Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
+
 ## 11. Current next action
 
-Advance to Generation Groundedness and Faithfulness Benchmark (Milestone 21) or Week 7 Telephony/SIP.
+Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).

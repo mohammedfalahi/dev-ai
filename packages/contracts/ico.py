@@ -24,6 +24,10 @@ class IncidentContextObject(BaseModel):
     signals: list[Signal]
     hypothesis: Hypothesis
     candidate_runbooks: list[CandidateRunbook]
+    proposed_action: str | None = Field(
+        default=None,
+        description="The primary remediation or diagnostic CLI/SQL command grounded in retrieved candidate runbooks",
+    )
 
     similar_past_incidents: list[dict[str, Any]] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)

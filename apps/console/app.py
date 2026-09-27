@@ -41,7 +41,7 @@ async def trigger_fault(fault_name: str):
             resp = await client.post(f"{BROKEN_SHOP_URL}/faults/{fault_name}")
             resp.raise_for_status()
             alert_data = resp.json()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             if fault_name == "reset":
                 active_session = None
                 active_proposed_command = None
@@ -69,7 +69,7 @@ async def trigger_fault(fault_name: str):
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
-    global active_session, active_proposed_command, active_tier
+    global active_proposed_command, active_tier
 
     if not active_session:
         raise HTTPException(

@@ -21,3 +21,14 @@ def classify_command(command: str) -> ActionTier:
         return ActionTier.TIER_2_MUTATING
         
     return ActionTier.TIER_1_READ_ONLY
+
+
+def classify_action_tier(command: str) -> int:
+    """
+    Classifies a proposed command into an integer policy tier:
+    - 1 for TIER_1_READ_ONLY
+    - 2 for TIER_2_MUTATING
+    """
+    tier = classify_command(command)
+    return 2 if tier == ActionTier.TIER_2_MUTATING else 1
+

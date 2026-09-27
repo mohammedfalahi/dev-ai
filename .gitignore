@@ -14,3 +14,7 @@ wheels/
 .DS_Store
 Thumbs.db
 
+# Evaluation reports
+eval-report.json
+
+
