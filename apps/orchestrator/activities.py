@@ -1,4 +1,5 @@
 from typing import Any
+
 from temporalio import activity
 
 from apps.investigator.engine import investigate_incident
@@ -25,10 +26,7 @@ async def validate_grounding_activity(ico_dict: dict[str, Any]) -> bool:
     brief = ico.to_voice_brief()
 
     # We mainly want to ensure the generated voice brief doesn't contain markdown or json
-    if not GroundingValidator.validate_voice_brief(brief, ico):
-        return False
-
-    return True
+    return GroundingValidator.validate_voice_brief(brief, ico)
 
 
 @activity.defn

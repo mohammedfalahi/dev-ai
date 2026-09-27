@@ -829,5 +829,65 @@
   - **Duplicate Vector Index Bloat**: Deterministic chunk IDs prevent vector tables from exploding in size during frequent CI/CD documentation deployments.
   - **Reranker Latency Degeneracy**: Fixed Top-5 RRF candidate pooling guarantees that cross-encoder inference time remains strictly constant on the incident response path.
 
+  ---
+
+  ## [2026-09-27] Milestone 23: Fast-Brain Voice Loop with LiveKit Agents and Gemini Live Native Audio
+
+  ### 1. What was built & which files were modified
+  - Migrated the voice architecture from cascaded STT $\to$ LLM $\to$ TTS to LiveKit Agents with the Gemini Live Multimodal Realtime API (`livekit-plugins-google`, model `gemini-live-2.5-flash-native-audio`).
+  - Integrated `VoiceAgentSession` in `apps/voice/agent.py`:
+    - Structured spoken brief delivery on connection derived from the pre-computed Incident Context Object (`ico.to_voice_brief()`).
+    - System instructions grounding conversational turns strictly on the ICO, enforcing concise 1-2 sentence speech without markdown or JSON formatting, and mandating refusal for ungrounded domains ("I don't have information on that.").
+    - Deterministic tool calling via LiveKit `@function_tool` (`execute_remediation_command`):
+      - Grounding validation via `GroundingValidator.validate_action` (requiring verbatim presence in retrieved candidate runbooks).
+      - Policy classification via `classify_command` (Tier 1 Read-Only vs Tier 2 Mutating).
+      - Mutating action gating: enforces the exact spoken keyword handshake (`GO` or `confirm`) before authorizing Tier 2 actions.
+      - Pluggable Temporal workflow signal dispatch: emits `execute_action_signal` to Temporal's `IncidentLifecycleWorkflow`.
+  - Expanded Temporal's `IncidentLifecycleWorkflow` in `apps/orchestrator/workflow.py` with `@workflow.signal async def execute_action_signal` and tracked actions state.
+  - Added LiveKit and Gemini Live configurations to `packages/core/config.py`.
+  - Implemented comprehensive offline unit tests in `tests/test_voice_agent.py`: session startup, spoken brief delivery, refusal invariants, approval keyword handshake, Tier 1 vs Tier 2 tool validation, and Temporal dispatcher integration.
+  - Updated `.context/architecture.md` (ADR-015 superseding ADR-002), `.context/library-docs.md`, and `.context/progress-tracker.md`.
+  - Files modified:
+    - `pyproject.toml` (Modified)
+    - `uv.lock` (Modified)
+    - `packages/core/config.py` (Modified)
+    - `apps/orchestrator/workflow.py` (Modified)
+    - `apps/orchestrator/activities.py` (Modified)
+    - `apps/voice/agent.py` (Modified)
+    - `tests/test_voice_agent.py` (Modified)
+    - `.context/architecture.md` (Modified)
+    - `.context/library-docs.md` (Modified)
+    - `.context/progress-tracker.md` (Modified)
+    - `learning.md` (Modified)
+
+  ### 2. The Core Concept & Math/Logic behind it (Plain English)
+  - **Native Audio Streaming (Speech-to-Speech) vs. Cascaded Latency Stacks**:
+    - In a cascaded voice pipeline, total perceived conversational turn latency is the sum of sequentially dependent components:
+      $$\text{Latency}_{\text{cascaded}} = T_{\text{VAD}} + T_{\text{STT}} + T_{\text{LLM\_TTFT}} + T_{\text{TTS\_TTFB}} + T_{\text{transport}}$$
+      With Silero VAD ($200\text{--}400\text{ ms}$) + streaming Deepgram STT ($80\text{--}150\text{ ms}$) + fast LLM ($250\text{--}450\text{ ms}$) + streaming TTS ($80\text{--}150\text{ ms}$) + WebRTC transport ($50\text{--}120\text{ ms}$), conversational turns often hit $900\text{--}1400\text{ ms}$, severely degrading the experience during high-stress on-call triage.
+    - With LiveKit Agents and Gemini Live native audio (`gemini-live-2.5-flash-native-audio`), acoustic modeling and token prediction are unified end-to-end within the multimodal model. Time-to-First-Audio drops to $250\text{--}450\text{ ms}$, effortlessly satisfying our strict conversational latency budget ($p50 \le 800\text{ ms}$, $p95 < 1\text{ s}$).
+  - **The "Two Clocks, Two Brains" Invariant & Pre-Computed Spoken Brief**:
+    - The voice agent never runs heavy retrieval, graph search, or database queries on the audio event loop. The slow-brain Investigator computes and validates the compact Incident Context Object (ICO) beforehand ($<2000$ tokens). The fast-brain agent immediately begins the conversation with `ico.to_voice_brief()`, delivering an authoritative two-sentence briefing on connect without waiting for user prompts.
+  - **Deterministic Tool Gating in Uncontrolled Audio Streams**:
+    - In speech-to-speech, text tokens are synthesized alongside acoustic frames, preventing pre-TTS regex interception. To preserve our core safety invariants (zero unapproved mutations, zero unsupported commands), CallOps forces all system mutations through structured LiveKit function tools (`execute_remediation_command`).
+    - The tool executes deterministically in Python:
+      1. Matches the candidate command verbatim against retrieved candidate runbook chunks (`GroundingValidator.validate_action`).
+      2. Classifies the command tier (`classify_command`).
+      3. Blocks Tier 2 mutations unless the exact spoken confirmation handshake (`GO` or `confirm`) was already received in the session.
+      4. Emits a durable signal to Temporal (`IncidentLifecycleWorkflow.execute_action_signal`).
+
+  ### 3. Interview Defense
+  - **Probable Interview Questions**:
+    1. *How do you prevent hallucinations and ungrounded commands in a speech-to-speech model (Gemini Live) where you cannot intercept raw text before audio generation?*
+       - **Answer**: While native audio streaming generates voice frames directly, the agent is structurally incapable of mutating external systems via speech alone. Any operational or diagnostic action requires invoking a structured function tool (`execute_remediation_command`). The tool execution runs entirely inside deterministic Python code: it checks verbatim substring inclusion against verified runbook chunks from the pre-computed ICO, classifies the command tier, and blocks mutating Tier 2 actions unless an exact spoken confirmation keyword (`GO` or `confirm`) has been received. If the model hallucinates an unsupported command, the tool returns `Refused: UNSUPPORTED_COMMAND`, completely stopping the mutation.
+    2. *Why decouple the confirmation handshake and policy classification from the LLM prompt, enforcing them deterministically in the tool wrapper?*
+       - **Answer**: Models are probabilistic and susceptible to prompt injection, social engineering, or misinterpreting casual assent (e.g. "yeah sure, go ahead"). Delegating authorization decisions to the prompt violates safety invariants. By tracking `is_confirmed` as a deterministic state variable in Python and validating exact regex matches on isolated keywords, we guarantee that casual conversation never authorizes a production rollout or database restart.
+  - **Architecture Choice (Why this over alternatives?)**:
+    - We integrated LiveKit Agents (`livekit-agents`) with the official Google Realtime plugin (`livekit-plugins-google`). LiveKit provides battle-tested WebRTC room orchestration, SIP gateway connectivity, and participant handling, while Gemini Live native audio eliminates the cumulative latency and transcription errors of cascading STT and TTS engines.
+  - **Failure Modes Prevented**:
+    - **Acoustic Hallucination & Phantom Execution**: The model cannot execute uncataloged commands; every command must match a verified runbook chunk.
+    - **Conversational Latency Outages**: Pre-computing the ICO ensures zero database or vector search operations occur on the audio hot-path.
+    - **False Approval from Casual Assent**: Enforcing exact keyword matches (`GO` / `confirm`) prevents background noise or casual conversational fillers from approving mutating operations.
+
 
 

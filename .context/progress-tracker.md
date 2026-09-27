@@ -320,6 +320,15 @@ Use this format for later entries:
 - Risks: Embeddings depend on Google GenAI API quota; local tests use running pgvector PostgreSQL container.
 - Next: Advance to Generation Groundedness and Faithfulness Benchmark (Milestone 21) or Week 7 Telephony/SIP.
 
+### 2026-09-27 — Fast-Brain Voice Loop with LiveKit Agents and Gemini Live (Milestone 23) Completed
+
+- State: PASS
+- Changes: `apps/voice/agent.py`, `tests/test_voice_agent.py`, `apps/orchestrator/workflow.py`, `packages/core/config.py`, `pyproject.toml`, `uv.lock`, `.context/architecture.md`, `.context/library-docs.md`, `.context/progress-tracker.md`
+- Verification: `uv run pytest tests/test_voice_agent.py -v` (10/10 passed), full suite `uv run pytest` (53/53 passed), `uv run ruff check apps/voice/ tests/test_voice_agent.py apps/orchestrator/ packages/core/` (all passed), `uv run mypy apps/voice/ tests/test_voice_agent.py apps/orchestrator/ packages/core/` (clean).
+- Metrics: Native bidirectional audio streaming configured via `livekit-plugins-google` (`gemini-live-2.5-flash-native-audio`). Precomputed ICO spoken brief delivered on connect. Deterministic tool calling intercepts all remediation commands with strict runbook grounding and Tier 1 / Tier 2 policy gating before signaling Temporal (`execute_action_signal`).
+- Risks: Realtime WebRTC audio requires live LiveKit server and Gemini Multimodal Live API quota in production PSTN/SIP deployments; offline simulation and unit test coverage validated locally.
+- Next: Advance to Generation Groundedness and Faithfulness Benchmark (Milestone 21) or Live SIP Trunking integration (Week 7).
+
 ## 11. Current next action
 
-Advance to Generation Groundedness and Faithfulness Benchmark (Milestone 21) or Week 7 Telephony/SIP.
+Advance to Generation Groundedness and Faithfulness Benchmark (Milestone 21) or Live SIP Trunking integration (Week 7).
