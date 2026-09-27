@@ -374,27 +374,53 @@ def record_score(
     metadata: Any = None,
     trace_id: str | None = None,
     observation_id: str | None = None,
+    session_id: str | None = None,
+    dataset_run_id: str | None = None,
     data_type: Literal["NUMERIC", "CATEGORICAL", "BOOLEAN", "TEXT", "CORRECTION"] | None = None,
 ) -> None:
-    """Record an evaluation score to Langfuse."""
+    """
+    Record an evaluation score to Langfuse.
+    Automatically resolves the active trace_id from OpenTelemetry context or generates
+    a valid trace identifier if not provided, satisfying Langfuse API constraint:
+    'Provide exactly one of the following: traceId (with optional observationId), sessionId or datasetRunId.'
+    """
     client = get_langfuse_client()
     if client is None:
         return
     try:
+        # Resolve trace association to satisfy Langfuse API constraints
+        resolved_trace_id = trace_id
+        if not resolved_trace_id and not session_id and not dataset_run_id:
+            resolved_trace_id = client.get_current_trace_id() or client.create_trace_id()
+
+        # Automatically infer data_type if not provided
+        resolved_data_type = data_type
+        if resolved_data_type is None:
+            if isinstance(value, bool):
+                resolved_data_type = "BOOLEAN"
+            elif isinstance(value, (int, float)):
+                resolved_data_type = "NUMERIC"
+            elif isinstance(value, str):
+                resolved_data_type = "CATEGORICAL"
+
         kwargs: dict[str, Any] = {
             "name": name,
             "value": value,
         }
+        if resolved_trace_id is not None:
+            kwargs["trace_id"] = resolved_trace_id
+        if observation_id is not None:
+            kwargs["observation_id"] = observation_id
+        if session_id is not None:
+            kwargs["session_id"] = session_id
+        if dataset_run_id is not None:
+            kwargs["dataset_run_id"] = dataset_run_id
+        if resolved_data_type is not None:
+            kwargs["data_type"] = resolved_data_type
         if comment is not None:
             kwargs["comment"] = comment
         if metadata is not None:
             kwargs["metadata"] = scrub_sensitive_data(metadata)
-        if trace_id is not None:
-            kwargs["trace_id"] = trace_id
-        if observation_id is not None:
-            kwargs["observation_id"] = observation_id
-        if data_type is not None:
-            kwargs["data_type"] = data_type
 
         client.create_score(**kwargs)
     except Exception as e:  # noqa: BLE001
