@@ -3,9 +3,13 @@ from typing import Any
 from temporalio import activity
 
 from apps.investigator.engine import investigate_incident
+from apps.voice.agent import VoiceAgentSession
 from packages.contracts.ico import IncidentContextObject
+from packages.contracts.telephony import DialRequest
+from packages.core.config import settings
 from packages.observability import scrub_sensitive_data, trace_span
 from packages.policy.grounding_validator import GroundingValidator
+from packages.providers.telephony import get_telephony_adapter
 
 
 @activity.defn
@@ -48,9 +52,10 @@ async def validate_grounding_activity(ico_dict: dict[str, Any]) -> bool:
 
 
 @activity.defn
-async def notify_oncall_activity(incident_id: str, ico_dict: dict[str, Any]) -> None:
+async def notify_oncall_activity(incident_id: str, ico_dict: dict[str, Any]) -> str:
     """
-    Simulates dispatching the alert and initiating the Voice Agent call.
+    Dispatches the alert, bootstraps the Voice Agent session with the precomputed ICO,
+    and initiates the outbound call or sets up WebRTC session according to TelephonyMode.
     """
     with trace_span(
         name="activity:notify_oncall",
@@ -58,8 +63,37 @@ async def notify_oncall_activity(incident_id: str, ico_dict: dict[str, Any]) -> 
         input={"incident_id": incident_id},
         metadata={"activity": "notify_oncall_activity"},
     ):
-        # In a real setup, this would trigger Twilio/LiveKit SIP bridging.
-        activity.logger.info(f"Notification dispatched for incident: {incident_id}")
+        ico = IncidentContextObject.model_validate(ico_dict)
+        session = VoiceAgentSession(ico=ico)
+        voice_brief = await session.get_initial_greeting()
+
+        mode = settings.telephony_mode.replace("_", "-").lower()
+        room_name = f"callops-{incident_id.lower()}"
+
+        if mode in ("livekit-rtc", "browser"):
+            status_msg = "SKIPPED_PSTN_RTC_READY"
+            activity.logger.info(
+                f"[notify_oncall_activity] Telephony mode '{settings.telephony_mode}' active. "
+                f"PSTN dial bypassed; ready for LiveKit WebRTC connection. "
+                f"Room: '{room_name}'. Connect via: https://agents-playground.livekit.io. "
+                f"Brief: '{voice_brief}'"
+            )
+            return status_msg
+
+        # Destination: use configured oncall_phone_number if set, else fallback simulation
+        target_number = settings.oncall_phone_number or "+15555550100"
+        adapter = get_telephony_adapter()
+        request = DialRequest(
+            incident_id=incident_id,
+            destination=target_number,
+            initial_brief=voice_brief,
+        )
+        call_id = await adapter.dial(request)
+        activity.logger.info(
+            f"Voice agent session bootstrapped for {incident_id}. "
+            f"Brief: '{voice_brief}'. Call dispatched: call_id={call_id}"
+        )
+        return call_id
 
 
 @activity.defn

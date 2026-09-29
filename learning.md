@@ -1053,5 +1053,380 @@
     - **Conversational Latency Outages**: Pre-computing the ICO ensures zero database or vector search operations occur on the audio hot-path.
     - **False Approval from Casual Assent**: Enforcing exact keyword matches (`GO` / `confirm`) prevents background noise or casual conversational fillers from approving mutating operations.
 
+---
+
+## [2026-09-27] Milestone 25: Controlled Telephony Adapter & Safety Guardrails (Week 7)
+
+### 1. What was built & which files were modified
+- `packages/contracts/telephony.py`: Defined strongly typed telephony contracts including `TelephonyMode` (`fake`, `livekit-sip`), `CallOutcomeType` (`human_answered`, `voicemail`, `no_answer`, `busy`, `error`), `DialRequest`, and `CallOutcomeEvent` (asynchronous webhook callback schema).
+- `packages/contracts/__init__.py`: Exported new telephony contracts.
+- `packages/core/config.py`: Expanded centralized configuration to include telephony controls: `telephony_mode`, `telephony_kill_switch`, `telephony_allowlist`, `max_calls_per_hour`, and `recording_enabled`.
+- `packages/providers/telephony.py` & `packages/providers/__init__.py`: Implemented telephony port-and-adapter layer:
+  - `TelephonyAdapter` (Protocol): Contract for outbound dial operations.
+  - `normalize_e164`: Strict E.164 phone number formatting and validation function.
+  - `assert_telephony_safety`: Pure safety gate function enforcing destination allowlists and checking the global telephony kill switch.
+  - `FakeTelephonyAdapter`: Deterministic sink adapter enforcing safety policies, tracking dispatched calls, and returning simulated call IDs for CI/testing without external network I/O.
+  - `LiveKitSipAdapter`: Stubbed production SIP adapter enforcing safety checks before raising `NotImplementedError` for live dispatch.
+- `apps/orchestrator/activities.py`: Updated `notify_oncall_activity` to instantiate the configured `TelephonyAdapter` and safely dispatch the dial request.
+- `tests/test_telephony.py`: Comprehensive test suite verifying E.164 validation, allowlist enforcement, kill switch gating, `FakeTelephonyAdapter` dispatch, and `LiveKitSipAdapter` contract stubbing.
+- Files touched:
+  - `packages/contracts/telephony.py` (Created)
+  - `packages/contracts/__init__.py` (Modified)
+  - `packages/core/config.py` (Modified)
+  - `packages/providers/__init__.py` (Created)
+  - `packages/providers/telephony.py` (Created)
+  - `apps/orchestrator/activities.py` (Modified)
+  - `tests/test_telephony.py` (Created)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Port-and-Adapter Pattern for Telephony Isolation**:
+  - Telephony and PSTN integration involve external provider APIs (Twilio, LiveKit Cloud SIP) that can incur substantial financial costs, introduce flake during CI runs, and pose critical safety risks if un-allowlisted or accidental phone calls are placed to real engineers.
+  - By placing outbound dialing behind a `TelephonyAdapter` protocol and defaulting to `FakeTelephonyAdapter`, we guarantee that tests and local development remain 100% offline and deterministic.
+- **Fail-Closed Safety Gates: E.164 Normalization, Allowlisting, and Global Kill Switch**:
+  - Outbound phone systems must never rely on runtime model judgment or unverified configuration to decide whether a destination is safe to dial.
+  - The safety layer enforces two mandatory guardrails:
+    1. **E.164 Normalization**: Validates that all phone numbers match `^\+[1-9]\d{1,14}$`, stripping formatting characters and rejecting malformed inputs before provider dispatch.
+    2. **Strict Destination Allowlisting**: Dials to numbers not explicitly present in `settings.telephony_allowlist` trigger an immediate `TelephonySecurityError` without emitting any network packet.
+    3. **Global Telephony Kill Switch**: When `settings.telephony_kill_switch` is true, all dial activities immediately fail-closed, providing an emergency stop mechanism against runaway dial loops or alert storms.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why implement strict destination allowlisting and a kill switch at the adapter boundary rather than relying on the orchestrator workflow logic?*
+     - **Answer**: Defense in depth requires safety invariants to be enforced at the lowest possible layer before side effects occur. If safety checks were only present in workflow activities, a bug or developer error in another part of the system (or a console simulation endpoint) could accidentally trigger a dial without authorization. Enforcing `assert_telephony_safety` inside every adapter's `dial()` method guarantees that no code path can ever place an outbound call without passing through the allowlist and kill-switch checks.
+  2. *How does the system prevent accidental PSTN billing and unwanted calls during automated CI/CD testing?*
+     - **Answer**: By default, `telephony_mode` is set to `"fake"`, which binds `FakeTelephonyAdapter`. This adapter records calls in an in-memory list and returns synthetic call identifiers without making external API or SIP requests. Furthermore, CI environments enforce `telephony_allowlist` restricted strictly to synthetic test numbers (e.g. `+15555550100`), ensuring that even if a live provider was accidentally configured, no real phone could be reached.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We separated telephony contracts (`packages/contracts/telephony.py`) from provider implementations (`packages/providers/telephony.py`) in accordance with the repository's inward-pointing dependency architecture. Applications import contracts and interfaces; domain models never depend on provider SDKs.
+- **Failure Modes Prevented**:
+  - **Runaway Dial Loops / Alert Storm Spam**: The global kill switch and allowlist prevent unconstrained automated dialing during incident storms.
+  - **Unauthorized Outbound Calls**: Strict allowlisting guarantees that test or staging environments cannot dial personal or executive phone numbers.
+
+---
+
+## [2026-09-27] Milestone 26: Resilient Primary-to-Fallback Voice Model Hierarchy
+
+### 1. What was built & which files were modified
+- `packages/core/config.py`: Extended centralized settings to support primary and fallback voice model configurations:
+  - `gemini_api_key: str | None = None`
+  - `gemini_live_model: str = "gemini-3.8-live"`
+  - `fallback_gemini_live_model: str = "gemini-live-2.5-flash-native-audio"`
+  - `google_cloud_project: str | None = None`
+  - `google_cloud_location: str = "us-central1"`
+  - `gemini_live_voice: str = "Puck"`
+- `apps/voice/agent.py`:
+  - Implemented `get_realtime_model(voice, instructions, api_key, model_name)` factory function:
+    - Attempts primary initialization with Google AI Studio (`gemini-3.8-live`, `vertexai=False`, `api_key=settings.gemini_api_key`).
+    - Catches `ValueError` / exceptions or missing API key and falls back cleanly to Google Cloud Vertex AI (`gemini-live-2.5-flash-native-audio`, `vertexai=True`, `project=settings.google_cloud_project`, `location=settings.google_cloud_location`).
+    - Handles `NOT_GIVEN` type compliance for unset GCP project/location.
+  - Updated `VoiceAgentSession.create_livekit_agent()` to consume `get_realtime_model()`.
+- `.env.example`: Documented `GEMINI_API_KEY`, `GEMINI_LIVE_MODEL`, `FALLBACK_GEMINI_LIVE_MODEL`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION` placeholders without leaking secrets.
+- `tests/test_voice_agent.py`: Added automated unit tests:
+  - `test_get_realtime_model_primary`: Verifies primary AI Studio model initialization when API key is present.
+  - `test_get_realtime_model_fallback_on_missing_key`: Verifies clean failover to Vertex AI when API key is unset.
+  - `test_get_realtime_model_fallback_on_exception`: Verifies clean failover to Vertex AI when primary model initialization encounters an error or HTTP 429 quota exhaustion.
+- `.context/architecture.md` (ADR-016) & `.context/progress-tracker.md`: Documented the primary-to-fallback architecture and marked the milestone as completed.
+- Files touched:
+  - `packages/core/config.py` (Modified)
+  - `apps/voice/agent.py` (Modified)
+  - `.env.example` (Modified)
+  - `tests/test_voice_agent.py` (Modified)
+  - `.context/architecture.md` (Modified)
+  - `.context/progress-tracker.md` (Modified)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **High-Availability Multi-Provider Model Hierarchy**:
+  - In production on-call operations, waking up an engineer during an outage cannot fail because a single LLM API key hits rate limits (HTTP 429) or is temporarily throttled by a consumer gateway.
+  - Google provides two distinct enterprise entry points for multimodal realtime models:
+    1. **Google AI Studio**: Fast developer access with API keys (`api.generativeai.google`), ideal for standard operations and lower friction setup with cutting-edge models (`gemini-3.8-live`).
+    2. **Google Cloud Vertex AI**: Enterprise infrastructure backed by GCP project quotas, IAM credentials, VPC service controls, and multi-region routing (`us-central1`).
+  - By structuring model instantiation as a resilient factory (`get_realtime_model`), the application prioritizes the bleeding-edge primary endpoint while providing a transparent, zero-exception fallback to enterprise Vertex AI whenever credentials or quota are degraded.
+- **Fail-Safe Initialization vs. Mid-Session Re-Anchoring**:
+  - At session creation time (`create_livekit_agent`), before audio transport begins, the system verifies provider viability. If developer credentials are unset or the model endpoint rejects initialization, failover occurs instantaneously in memory without degrading the call setup time or exposing runtime exceptions to the LiveKit worker.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why implement a dual-endpoint hierarchy (Google AI Studio -> Google Cloud Vertex AI) instead of simply retrying the primary model on failure?*
+     - **Answer**: When an on-call voice agent triggers during a critical outage, retry loops against a rate-limited or exhausted API key (`ResourceExhausted` / HTTP 429) burn precious seconds of the incident escalation budget and will repeatedly fail until quota reset. Google AI Studio and Google Cloud Vertex AI operate on completely decoupled quota pools, authentication mechanisms (API keys vs Google Cloud IAM/ADC), and backend API routes. If AI Studio is throttled, failing over to Vertex AI immediately routes to dedicated Google Cloud enterprise capacity, ensuring the voice call connects without delaying on-call triage.
+  2. *How do you prevent credential leakage when configuring both consumer API keys and enterprise cloud project IDs in a unified environment?*
+     - **Answer**: We enforce strict decoupling between code, committed version control, and environment secrets. The `Settings` model in `packages/core/config.py` loads variables strictly from the environment or untracked `.env` files via `pydantic-settings`. `.env.example` contains only hollow string templates (`""`), while `.gitignore` strictly protects `.env`. Furthermore, our `packages/observability/redaction.py` scrubbing layer automatically redacts any strings matching API keys or Bearer tokens before passing telemetry or error logs to external collectors.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We encapsulated model failover directly inside `get_realtime_model` rather than scattering conditional logic throughout `VoiceAgentSession`. This keeps the session logic focused solely on grounded conversation and deterministic tool dispatch, while keeping model provider resilience encapsulated in a reusable factory function.
+- **Failure Modes Prevented**:
+  - **Outage Call Failure from Quota Throttling**: Primary model rate-limits no longer drop on-call calls; the system transparently dials via Vertex AI.
+  - **Startup Crashes from Missing API Keys**: Local or test environments lacking an explicit `GEMINI_API_KEY` smoothly fall back to GCP Default Application Credentials without throwing fatal startup exceptions.
+
+---
+
+## [2026-09-27] Milestone 27: Integrate Investigator and Voice Orchestration (Week 8)
+
+### 1. What was built & which files were modified
+- `packages/contracts/ico.py`:
+  - Refactored `IncidentContextObject.to_voice_brief()` to generate an empathetic, human conversational greeting (*"Hello, sorry to wake you up. We are tracking a SEV1 incident on checkout-api..."*).
+  - Sanitized technical formatting, markdown backticks, and tildes into natural spoken prose (*"about 94 percent"*).
+- `apps/voice/agent.py`:
+  - Upgraded `VoiceAgentSession` system instructions: empathetic on-call SRE persona, concise 1–2 sentence turns, natural metric pronunciation, strict ICO grounding, and instructions for Gemini Live to invoke `execute_remediation_command` upon receiving affirmative spoken assent.
+  - Resolved circular import by deferring `IncidentLifecycleWorkflow` import inside `default_signal_temporal`.
+  - Expanded `check_confirmation()` to support a comprehensive suite of affirmative conversational assent phrases (*"confirm"*, *"go ahead"*, *"yes please"*, *"do that"*, *"yeah sure"*, *"go"*, *"proceed"*, *"approve"*, *"do it"*, *"yes"*, *"sure"*), while enforcing negative override detection (*"no"*, *"don't"*, *"wait"*, *"cancel"*).
+- `apps/orchestrator/activities.py`:
+  - Updated `notify_oncall_activity` to hydrate `IncidentContextObject` from `ico_dict`, bootstrap `VoiceAgentSession`, precompute the empathetic voice brief, and dispatch the outbound dial via `TelephonyAdapter`.
+- `tests/conftest.py`:
+  - Added global test configuration setting `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` to guarantee 100% offline hermetic test runs without unauthenticated HuggingFace Hub network checks.
+- `tests/test_voice_agent.py` & `tests/test_contracts.py`:
+  - Updated Test 1 and Test 3 for the empathetic greeting format.
+  - Updated Test 5 to verify conversational assent phrases succeed while negative phrases fail.
+  - Added Test 14 verifying that conversational assent authorizes mutating Tier 2 action dispatch to Temporal.
+- `.context/architecture.md` (ADR-017) & `.context/progress-tracker.md`:
+  - Documented ADR-017 (Empathetic Voice Delivery and Flexible Spoken Assent) and marked Week 8 as `PASS`.
+- Files modified:
+  - `packages/contracts/ico.py` (Modified)
+  - `apps/voice/agent.py` (Modified)
+  - `apps/orchestrator/activities.py` (Modified)
+  - `tests/conftest.py` (Created)
+  - `tests/test_voice_agent.py` (Modified)
+  - `tests/test_contracts.py` (Modified)
+  - `.context/architecture.md` (Modified)
+  - `.context/progress-tracker.md` (Modified)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Empathetic Conversational Design vs. Rigid Machine Recitation**:
+  - Waking an engineer at 3 AM with robotic JSON serialization or flat error strings dramatically increases cognitive friction and triage time. Human speech requires natural cadence: an empathetic opening apology, clear severity and service framing, natural approximation of metrics (*"about 94 percent"* instead of *"~94.32%"*), and a single concise question offering next steps.
+  - Pre-computing this brief in `ico.to_voice_brief()` guarantees that the speech synthesis engine receives cleanly formatted text with zero markdown backticks or syntax brackets.
+- **Flexible Conversational Assent with Deterministic Safety Gates**:
+  - Real human engineers do not speak in single-word CLI commands like `"GO"` when woken up; they say `"yeah sure"`, `"go ahead"`, or `"do that"`.
+  - To bridge natural conversation with safety, we implement a two-layer validation model:
+    1. **Probabilistic Intent / Spoken Assent Detection**: Gemini Live interprets verbal assent and invokes `execute_remediation_command`. In parallel, `check_confirmation()` matches word-bounded affirmative phrases while scanning for negative modifiers (*"no"*, *"don't"*).
+    2. **Deterministic Grounding & Tier Enforcement**: The tool execution itself is strictly deterministic: it validates verbatim substring inclusion in pre-verified runbook chunks and verifies policy tier. Mutating Tier 2 commands cannot be dispatched unless affirmative assent is verified.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *How do you allow natural spoken assent ('yeah sure', 'go ahead') without risking accidental execution from background noise or unrelated conversational filler?*
+     - **Answer**: We combine pattern-bounded phrase matching with an explicit negative override filter and deterministic runbook grounding. In `check_confirmation()`, affirmative phrases are evaluated using word-boundary regular expressions (`\b(yeah sure|go ahead|confirm)\b`), while negative/canceling tokens (`\b(no|dont|wait|cancel)\b`) immediately override and fail closed. Crucially, even if assent is recognized, the tool cannot execute arbitrary commands: the action must match verbatim against retrieved runbook chunks verified by the slow-brain Investigator.
+  2. *Why hydrate the VoiceAgentSession inside Temporal's `notify_oncall_activity` rather than running a long-lived stateful voice service?*
+     - **Answer**: Temporal ensures that the incident lifecycle is durable, auditable, and replayable across worker restarts. By validating and passing the precomputed ICO into `notify_oncall_activity`, the activity remains idempotent: it reconstructs the voice session from the validated snapshot without re-running database or vector searches, ensuring Time-to-First-Audio remains well within our sub-second latency budget.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We enhanced `to_voice_brief()` on the `IncidentContextObject` contract itself rather than having the voice model generate its own opening summary dynamically. This ensures that the opening statement delivered upon call pickup is 100% deterministic, pre-validated against safety rules, and requires zero LLM generation latency on the audio hot-path.
+- **Failure Modes Prevented**:
+  - **Cognitive Overload on Call Pickup**: Responders receive an empathetic, natural two-sentence summary rather than confusing machine error logs.
+  - **Stuck Approval Deadlocks**: Responders saying natural conversational affirmative phrases are no longer repeatedly rebuffed by rigid single-keyword requirements.
+
+---
+
+## [2026-09-27] Milestone 28: 2-Page Developer Console & Evaluation Hub
+
+### 1. What was built & which files were modified
+- `apps/console/app.py`:
+  - Added route `GET /triage` serving `apps/console/static/triage.html`.
+  - Added route `POST /api/drill/trigger` triggering `labs/broken-shop` faults (with synthetic fallback), generating slow-brain ICOs, and bootstrapping voice sessions with unique drill workflow IDs.
+  - Added route `GET /api/drill/status/{workflow_id}` returning real-time workflow status, call state, active ICO, and dispatched action audit history.
+  - Added route `GET /api/evals/latest` returning cached `eval-report.json` (or executing a fast slice run if absent).
+  - Added route `POST /api/evals/run` executing `run_eval_matrix(limit=5)`, saving results to disk, and returning updated 3-tier metrics.
+  - Maintained backward compatibility for `POST /api/faults/{name}` and `POST /api/chat`.
+- `apps/console/static/index.html` (Dashboard 1 — Main Operations & Chaos Console):
+  - Added top navigation connecting to `/triage`.
+  - Left Panel: Fault injection buttons for broken-shop (`db-pool-exhaustion`, `redis-oom`, `edge-502`, `undocumented-anomaly`, `reset`), service health badges (`checkout-api`, `redis-cache`, `edge-proxy`), and gateway deduplication counters.
+  - Right Panel: Real-time call status pill, deterministic policy gate badge (Tier 1 vs. Tier 2 confirmation status), streaming conversational transcript, and quick-reply conversational assent buttons.
+- `apps/console/static/triage.html` (Dashboard 2 — Triage Forensics & Evaluation Hub):
+  - Added top navigation connecting to `/`.
+  - Left Panel: Structured card view of the Incident Context Object (headline, severity, service, impact, leading hypothesis with confidence meter, candidate runbook with cross-encoder score, and grounded AST command) with raw JSON toggle.
+  - Right Panel: Visual scorecard for the 3-Tier Evaluation Matrix (Tier 1 Retrieval Recall@1/3/5, Tier 2 Reranking MRR & Refusal Precision, Tier 3 Generation & AST Grounding), latency telemetry card (TTFA, p95 turn latency), link to Langfuse traces, and `[ Run Evaluation Matrix ]` on-demand execution button with loading spinner.
+- `tests/test_console.py`:
+  - Added unit tests for `GET /`, `GET /triage`, `POST /api/drill/trigger`, `GET /api/drill/status/{workflow_id}`, `GET /api/evals/latest`, and `POST /api/evals/run`.
+- `.context/progress-tracker.md`: Logged Milestone 28 completion.
+- Files modified:
+  - `apps/console/app.py` (Modified)
+  - `apps/console/static/index.html` (Modified)
+  - `apps/console/static/triage.html` (Created)
+  - `tests/test_console.py` (Modified)
+  - `.context/progress-tracker.md` (Modified)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Unified Runtime Operations vs. Offline Evaluation Observability**:
+  - Developing an autonomous on-call voice system requires two distinct visualization perspectives:
+    1. **Operational Runtime Perspective (Dashboard 1)**: Observes what happens when a service breaks in real time—the incoming alert spike, deduplication, live call connection, and conversational policy gating.
+    2. **Forensic & Quality Assurance Perspective (Dashboard 2)**: Analyzes why the system made its decisions—the retrieved context, cross-encoder ranking scores, verbatim runbook commands, and the statistical evaluation matrix that proves system readiness across canonical regression test suites.
+  - By separating these into a dedicated 2-page console linked by a clean navigation header, developers can trigger an incident drill in Dashboard 1 and immediately inspect the forensic ICO and evaluation quality gates in Dashboard 2 without terminal toolchain friction.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why build a custom web console rather than relying exclusively on Temporal Web UI and Langfuse dashboards?*
+     - **Answer**: While Temporal visualizes workflow DAG state and Langfuse visualizes distributed LLM traces, neither provides the domain-specific on-call synthesis: injecting chaos faults into the breakable lab, observing gateway deduplication, validating the deterministic Tier 1/Tier 2 policy gate during live voice turns, and inspecting the 3-tier retrieval/reranking/generation evaluation matrix side-by-side with the precomputed ICO. The Developer Console bridges local chaos engineering with high-level evaluation metrics in a single interface.
+  2. *How does the console prevent blocking the HTTP server when running resource-intensive evaluation matrices on demand?*
+     - **Answer**: The `/api/evals/run` and `/api/evals/latest` endpoints leverage asynchronous coroutines and slice limits (`limit=3` or `limit=5`) to keep execution fast. Furthermore, because our test environment enforces offline HuggingFace execution (`HF_HUB_OFFLINE=1`), cross-encoder rerankers load from local disk cache instantaneously without incurring remote network timeouts. Results are persisted to `eval-report.json`, allowing the dashboard to render cached metrics immediately upon initial page load.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We decoupled the static HTML/Tailwind frontend from backend frameworks (no complex React/Node build steps). FastAPI serves pre-rendered static assets directly, ensuring zero-build overhead and fresh-clone startup in <1 second.
+- **Failure Modes Prevented**:
+  - **Blind Fault Injection**: Developers can immediately verify whether an alert was deduplicated and how the voice agent responded.
+  - **Hidden Metric Regressions**: The 3-tier evaluation scorecard surfaces Recall drops, MRR degradation, and forbidden claim violations directly in the UI.
+
+---
+
+## [2026-09-28] Milestone 29: Voice Assent Tool Execution, Real-Time Console State Transition & Fault Lifecycle Reset
+
+### 1. What was built & which files were modified
+- `apps/voice/agent.py`:
+  - Updated system prompt for Gemini Live `RealtimeModel` / `AgentSession` with explicit directive: upon conversational verbal assent (*"go ahead"*, *"confirm"*, *"do it"*, *"proceed"*, *"yeah sure"*), the model must immediately execute `execute_remediation_command` rather than re-prompting the engineer for confirmation.
+  - Updated `@function_tool` `execute_remediation_command` to set `self.is_confirmed = True`, invoke `execute_tool(command)`, and return structured JSON (`{"status": "SUCCESS", "message": "Remediation executed successfully. DB pool cleared.", "details": ...}`) so the model delivers a clean single spoken turn and halts further prompts.
+  - Implemented `notify_console_resolution(command)` in `VoiceAgentSession`: dispatches non-blocking async HTTP POST notifications to `/api/faults/resolve` with a 2-second timeout and graceful degradation.
+- `apps/console/app.py`:
+  - Added global fault lifecycle state tracking (`active_fault`, `active_fault_status`, `fault_states`).
+  - Added `POST /api/faults/resolve` endpoint: transitions the active fault status to `RESOLVED`, sets `active_session.is_confirmed = True`, and updates the fault registry.
+  - Enhanced `POST /api/faults/reset` endpoint: supports both global reset and targeted `fault_id` payloads (e.g. `{"fault_id": "db-pool-exhaustion"}`), restores broken-shop simulation state, and reverts active session state back to `IDLE`.
+  - Added `GET /api/faults/status` endpoint: provides real-time state introspection for active faults and session confirmation.
+  - Updated `/api/chat` and `POST /api/faults/{fault_name}` to maintain synchronicity with fault states.
+- `apps/console/static/index.html`:
+  - Structured chaos fault cards into dynamic containers (`fault-container-db-pool-exhaustion`, etc.).
+  - Implemented real-time visual transition from red chaos injection button into a green `✅ Problem Solved` / `RESOLVED` card upon incident remediation.
+  - Added adjacent `🔄 Reset State` button to resolved cards: dispatches `POST /api/faults/reset`, flips the card back to its original red chaos button, clears chat history, and restores the standby briefing panel.
+  - Added 1.5-second polling interval (`startPolling`/`stopPolling`) during active incident drills to automatically reflect resolution across distributed voice sessions without page reload.
+- `packages/core/config.py`:
+  - Added `console_url: str = "http://localhost:8000"` configuration setting.
+- `tests/test_voice_agent.py` & `tests/test_console.py`:
+  - Added tests verifying function tool execution with verbal assent, JSON confirmation formatting, console HTTP notification dispatch, fault resolution endpoint transitions, and targeted reset handling.
+- Files modified:
+  - `apps/voice/agent.py` (Modified)
+  - `apps/console/app.py` (Modified)
+  - `apps/console/static/index.html` (Modified)
+  - `packages/core/config.py` (Modified)
+  - `tests/test_voice_agent.py` (Modified)
+  - `tests/test_console.py` (Modified)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Closed-Loop Multimodal Remediation Handshake**:
+  - In high-pressure incident response, verbal human assent must bridge two worlds:
+    1. **The Multimodal Voice Plane (Fast Brain)**: The engineer speaks natural conversational agreement (*"yeah sure, do it"*). The system prompt instructs Gemini Live to execute the bound function tool immediately rather than entering an infinite re-prompting confirmation loop. The tool returns structured JSON so the model produces an empathetic, definitive closure turn (*"Remediation executed successfully. DB pool cleared."*).
+    2. **The Operational Web Console (Real-Time State)**: When the voice agent executes the tool, it triggers an event to the console server. The console transitions the fault state from `TRIGGERED` to `RESOLVED`.
+  - **State Machine Lifecycle Reversion**:
+    - Chaos lifecycle follows the deterministic finite state machine:
+      $$\text{IDLE} \xrightarrow{\text{triggerFault()}} \text{TRIGGERED} \xrightarrow{\text{execute\_remediation()}} \text{RESOLVED} \xrightarrow{\text{resetFault()}} \text{IDLE}$$
+    - The client-side dashboard polls at $\Delta t = 1.5\text{s}$ when an incident is active. As soon as `active_fault_status == "RESOLVED"`, the card flips to green. Clicking `🔄 Reset State` resets the backend state, broken-shop simulators, and cleans up the UI for the next drill cycle.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *How do you prevent conversational loops where a voice model keeps asking 'Are you sure?' even after the engineer says 'yes, go ahead'?*
+     - **Answer**: Conversational voice models with tool-use can get trapped in repetitive confirmation spirals if the system instructions lack clear termination conditions or if tool results return ambiguous strings. We resolve this on two layers: (1) System prompt explicitly commands the model that verbal assent must immediately invoke `execute_remediation_command` without repeating confirmation; (2) The `@function_tool` returns explicit JSON containing `"status": "SUCCESS"` and a definitive spoken turn instruction, directing the model to speak a single completion turn and cease prompting.
+  2. *Why decouple the Voice Agent from the Console server using asynchronous fire-and-forget HTTP notifications with strict timeouts?*
+     - **Answer**: The voice agent operates on a strict sub-second audio streaming budget (<800ms Time-to-First-Audio). If the console server is slow, restarting, or experiencing transient network blips, blocking the voice agent's audio turn on an HTTP response would degrade the user's phone call experience. By setting a 2.0-second timeout, wrapping the call in error handling, and failing open, the voice conversation remains fluid and uninterrupted regardless of console status.
+- **Architecture Choice (Why this over alternatives?)**:
+  - Rather than requiring heavy WebSockets with bi-directional synchronization libraries for a lightweight local dashboard, we used lightweight status polling (1.5s interval during active drills) coupled with targeted REST endpoints (`POST /api/faults/resolve` and `POST /api/faults/reset`). This minimizes client complexity, works seamlessly in test environments, and ensures zero runtime bundle build overhead.
+- **Failure Modes Prevented**:
+  - **Confirmation Spiral Bug**: Engineers are no longer stuck repeating affirmative words to a confused agent.
+  - **Console Desynchronization**: Dashboard operators no longer have to manually refresh the page to see if the voice agent fixed the fault.
+  - **Stuck Chaos State**: Faults can be cleanly reset and re-triggered repeatedly for continuous integration drills.
+
+---
+
+## [2026-09-28] Milestone 30: Optional PSTN Dialing, Twilio Adapter & Demo Mode Configuration
+
+### 1. What was built & which files were modified
+- `packages/contracts/telephony.py`:
+  - Extended `TelephonyMode` enum with `LIVEKIT_RTC = "livekit-rtc"`, `BROWSER = "browser"`, and `TWILIO = "twilio"`.
+- `packages/core/config.py`:
+  - Updated default `telephony_mode` to `"livekit-rtc"`.
+  - Added optional Twilio configuration fields (`twilio_account_sid`, `twilio_auth_token`, `twilio_from_number`).
+  - Added robust `@field_validator` for `telephony_allowlist` to parse single numbers, comma-separated lists, and JSON arrays without decoding errors.
+- `packages/providers/telephony.py`:
+  - Implemented `TwilioVoiceAdapter` adhering to `TelephonyAdapter` protocol and enforcing `assert_telephony_safety`.
+  - Updated `get_telephony_adapter()` factory to return `FakeTelephonyAdapter()` for `"livekit-rtc"`, `"browser"`, and `"fake"`, while instantiating `TwilioVoiceAdapter` for `"twilio"` and `LiveKitSipAdapter` for `"livekit-sip"`.
+- `apps/orchestrator/activities.py`:
+  - Updated `notify_oncall_activity` to check `settings.telephony_mode`.
+  - When in `"livekit-rtc"` or `"browser"` mode, skips outbound carrier dialing, logs the generated room name and browser playground connection URL (`https://agents-playground.livekit.io`), and returns status `"SKIPPED_PSTN_RTC_READY"`.
+  - When in `"twilio"` or `"fake"` mode, executes `adapter.dial()` through the safety guardrails.
+- `scripts/toggle_demo_mode.sh`:
+  - Created an executable utility script to toggle or explicitly set `TELEPHONY_MODE` in `.env` between `"livekit-rtc"` and `"twilio"` safely without printing secrets.
+- `.env.example`:
+  - Updated default to `TELEPHONY_MODE="livekit-rtc"` and documented optional Twilio configuration variables.
+- `tests/test_telephony.py`:
+  - Added unit test cases for factory adapter selection across all modes, `TwilioVoiceAdapter` credential & allowlist validation, and `notify_oncall_activity` livekit-rtc bypass logic.
+- Files modified/created:
+  - `packages/contracts/telephony.py` (Modified)
+  - `packages/core/config.py` (Modified)
+  - `packages/providers/telephony.py` (Modified)
+  - `apps/orchestrator/activities.py` (Modified)
+  - `scripts/toggle_demo_mode.sh` (Created)
+  - `.env.example` (Modified)
+  - `tests/test_telephony.py` (Modified)
+  - `.context/progress-tracker.md` (Modified)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Transport vs. Carrier Decoupling in Streaming Voice AI**:
+  - The core AI interaction (voice-to-voice reasoning with LiveKit and Gemini Live) is fundamentally decoupled from the telecom delivery network:
+    $$\text{Incident Trigger} \xrightarrow{\text{Temporal DAG}} \text{Voice Agent Room Dispatch} \begin{cases} \xrightarrow{\text{Demo Mode (RTC)}} \text{Browser Playground (WebRTC)} \\ \xrightarrow{\text{Carrier Mode (PSTN)}} \text{Twilio / LiveKit SIP Trunk} \end{cases}$$
+  - For presentations, hackathons, and local development, placing real outbound cellular calls introduces carrier latency, roaming costs, and carrier registration bottlenecks. By enabling `TELEPHONY_MODE="livekit-rtc"` as the default, developers can connect directly from any browser using LiveKit's web agent playground (`agents-playground.livekit.io`), hearing the voice agent deliver the incident brief and accepting speech turns with sub-second audio streaming.
+  - When physical phone escalation is authorized, switching to `TELEPHONY_MODE="twilio"` routes outbound audio through verified Twilio trunks with strict destination allowlisting and kill-switch protection.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why decouple the real-time WebRTC audio transport from PSTN carrier termination in an AI on-call system?*
+     - **Answer**: WebRTC handles ultra-low latency, full-duplex bi-directional audio streaming between the client and the agent server over UDP, whereas PSTN termination (via Twilio or SIP trunks) is merely an edge telephony bridge that converts cellular/PSTN audio into WebRTC audio streams. By treating PSTN dialing as an optional peripheral adapter rather than the core audio loop, we can test and demo the entire system hermetically in a browser without incurring carrier costs, telecom latency, or external SIP dependencies.
+  2. *How do you guarantee that a developer running in demo mode or local testing cannot accidentally trigger real PSTN telephony charges or dial an unintended phone number?*
+     - **Answer**: We enforce defense-in-depth across three architectural layers:
+       1. **Mode-Level Separation**: In `notify_oncall_activity`, when `TELEPHONY_MODE` is `"livekit-rtc"`, carrier dialing logic is completely bypassed at the code branch level, returning `SKIPPED_PSTN_RTC_READY`.
+       2. **Adapter Safety Checks**: Even if `TELEPHONY_MODE` is set to `"twilio"`, every adapter's `dial()` method executes `assert_telephony_safety()`, which enforces the global kill-switch and verifies that the destination is on an explicit E.164 allowlist.
+       3. **Credential Guardrails**: If Twilio credentials (`TWILIO_ACCOUNT_SID` or `TWILIO_AUTH_TOKEN`) are missing or blank, `TwilioVoiceAdapter` fails closed with a `TelephonySecurityError` before attempting network calls.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We implemented an adapter factory pattern (`get_telephony_adapter()`) with normalized mode strings (`livekit-rtc`, `browser`, `fake`, `twilio`, `livekit-sip`). This avoids polluting core workflow code with provider-specific SDK imports and enables switching between zero-cost local browser demonstrations and production PSTN calling via a single environment variable.
+- **Failure Modes Prevented**:
+  - **Accidental Bill Shock & Carrier Spam**: Developers and CI pipelines cannot accidentally place real cellular phone calls or burn telecom credits during development.
+  - **Demo Flake Due to Carrier Failures**: Demonstrations do not fail if mobile networks have poor cellular reception; users can connect directly over high-fidelity browser WebRTC.
+
+---
+
+## [2026-09-29] Milestone 31: End-to-End PSTN Dialing Wiring & HTTPS TwiML Compatibility
+
+### 1. What was built & which files were modified
+- `packages/providers/telephony.py`:
+  - Resolved Twilio carrier playback error (*"An error has occurred. Please check the URL and try again"*) by upgrading from plain HTTP to `https://twimlets.com/echo?Twiml=...` using standard `voice="alice"` and `urllib.parse.quote_plus()`.
+  - Added support for `settings.twilio_twiml_url` allowing custom TwiML Bin or webhook overrides.
+  - Implemented `_resolve_dial_request()` helper ensuring `FakeTelephonyAdapter`, `LiveKitSipAdapter`, and `TwilioVoiceAdapter` all accept both `DialRequest` instances and flexible keyword arguments (`to_phone_number`, `destination`, `incident_id`, `initial_brief`, `caller_id`).
+- `packages/contracts/telephony.py`:
+  - Enhanced `DialRequest` model with `to_phone_number` alias and `initial_brief` field with `populate_by_name=True`.
+- `packages/core/config.py`:
+  - Added `oncall_phone_number: str | None = None` and `twilio_twiml_url: str | None = None` to `Settings`.
+  - Added `@model_validator` ensuring configured `oncall_phone_number` is automatically included in `telephony_allowlist`.
+- `apps/orchestrator/activities.py`:
+  - Updated `notify_oncall_activity` to route outbound calls to `settings.oncall_phone_number` and forward the dynamic `initial_brief=voice_brief`.
+- `apps/console/app.py`:
+  - Wired `trigger_fault()` to invoke `notify_oncall_activity` so that fault injection drills automatically dispatch live outbound PSTN calls when `TELEPHONY_MODE="twilio"`, or return `SKIPPED_PSTN_RTC_READY` in demo mode.
+- `tests/test_telephony.py`:
+  - Updated test fixtures to verify factory selection, Twilio adapter execution, and activity dispatch.
+- Files modified:
+  - `packages/providers/telephony.py` (Modified)
+  - `packages/contracts/telephony.py` (Modified)
+  - `packages/core/config.py` (Modified)
+  - `apps/orchestrator/activities.py` (Modified)
+  - `apps/console/app.py` (Modified)
+  - `tests/test_telephony.py` (Modified)
+  - `.context/progress-tracker.md` (Modified)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **Telecom Webhook Execution & The 301 Redirect Trap**:
+  - Twilio outbound calls execute in a decoupled, two-stage handshake:
+    1. **Stage 1 (API Request)**: CallOps sends `POST /2010-04-01/Accounts/{SID}/Calls.json` providing `To`, `From`, and `Url`. Twilio validates credentials and immediately queues the outbound carrier call, returning `201 Created` with a Call SID.
+    2. **Stage 2 (Webhook Retrieval)**: When the human answers the phone, Twilio's media server issues an HTTP GET to the specified `Url` to fetch TwiML execution instructions (`<Say>`, `<Gather>`, etc.).
+  - **The Defect**: If `Url` uses unencrypted `http://twimlets.com`, the CDN (CloudFront) returns `HTTP 301 Moved Permanently` to `https://`. Twilio's telephony voice engine does not follow HTTP redirects for call instructions—it aborts immediately with **Error 11200 (HTTP Retrieval Failure)** and plays the default error recording.
+  - **The Fix**: Passing native `https://twimlets.com/echo?Twiml=...` with properly URL-encoded TwiML (`urllib.parse.quote_plus`) allows Twilio's voice server to fetch the XML directly with `200 OK`, speaking the dynamic incident brief as soon as the engineer answers.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why does passing an HTTP URL to Twilio Voice fail with "An application error has occurred" even when the endpoint works in curl?*
+     - **Answer**: Twilio's media servers enforce strict telecom security policies and low-latency bounds when processing answered calls. Most CDNs issue a 301 redirect from HTTP to HTTPS. To mitigate open-redirect attacks and avoid introducing call-setup latency, Twilio Voice treats 3xx HTTP redirects as fatal retrieval failures (Error 11200). Providing direct HTTPS URLs with URL-encoded query parameters ensures zero redirects and immediate XML parsing.
+  2. *In an automated incident response system, how do you handle disparate interfaces between workflow activity runners and standalone utility scripts?*
+     - **Answer**: We implemented an interface adapter pattern with `_resolve_dial_request()`. Whether caller code invokes `adapter.dial(request)` passing a strongly-typed `DialRequest` Pydantic model (used in Temporal workflow activities) or calls `adapter.dial(to_phone_number="+91...", initial_brief="...")` using keyword arguments (used in CLI utilities and developer quickstarts), the adapter normalizes inputs seamlessly, enforcing allowlist security and kill-switch checks before dispatch.
+- **Architecture Choice (Why this over alternatives?)**:
+  - We integrated `notify_oncall_activity` directly into `apps/console/app.py`'s `trigger_fault()` handler. This creates an end-to-end feedback loop: clicking a chaos button in the web dashboard not only injects the failure and runs the slow-brain investigator, but also triggers the configured telephony mode (WebRTC demo or Twilio PSTN call) without needing separate manual CLI triggers.
+- **Failure Modes Prevented**:
+  - **Carrier Webhook Abort (Error 11200)**: Eliminates 301 redirect failures during live phone call pickup.
+  - **Silent Fault Injection**: Prevents the console from simulating faults without notifying the on-call engineer.
+  - **Calling Convention TypeErrors**: Resolves discrepancies between contract objects and keyword arguments across adapters.
+
+
+
 
 

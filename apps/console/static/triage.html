@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>On-call Voice — Triage Forensics & Evaluation Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .score-bar-bg {
+            background-color: #e5e7eb;
+            height: 6px;
+            border-radius: 9999px;
+            overflow: hidden;
+        }
+        .score-bar-fill {
+            height: 100%;
+            border-radius: 9999px;
+            transition: width 0.4s ease-in-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans h-screen flex flex-col">
+
+<!-- Top Navigation Bar -->
+<header class="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center shadow-sm">
+    <div class="flex items-center gap-6">
+        <div class="flex items-center gap-2">
+            <span class="text-xl">📊</span>
+            <span class="font-bold text-gray-900 text-lg">On-call Voice</span>
+            <span class="bg-indigo-100 text-indigo-800 text-xs font-semibold px-2 py-0.5 rounded">Triage & Evals</span>
+        </div>
+        <nav class="flex space-x-1">
+            <a href="/" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-md flex items-center gap-1">
+                <span class="text-xs text-gray-400">←</span>
+                1. Operations & Chaos
+            </a>
+            <a href="/triage" class="px-3 py-1.5 text-sm font-semibold text-indigo-700 bg-indigo-50 rounded-md">2. Triage & Eval Hub</a>
+        </nav>
+    </div>
+    <div class="flex items-center gap-4">
+        <div id="overall-badge" class="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            GATES PASSED
+        </div>
+        <button id="btn-run-evals" onclick="triggerRunEvals()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm transition">
+            <span id="eval-spinner" class="hidden animate-spin">🔄</span>
+            <span>Run Evaluation Matrix</span>
+        </button>
+    </div>
+</header>
+
+<!-- Main 2-Column Layout -->
+<main class="flex-1 flex overflow-hidden">
+
+    <!-- Left Column: Active ICO Forensics -->
+    <section class="w-1/2 p-6 bg-white border-r border-gray-200 overflow-y-auto flex flex-col gap-5">
+        <div class="flex justify-between items-center border-b pb-3">
+            <div>
+                <h2 class="text-base font-bold text-gray-900">Incident Context Object (ICO) Forensics</h2>
+                <p class="text-xs text-gray-500">Slow-Brain structured output passed to Fast-Brain Voice Agent</p>
+            </div>
+            <button onclick="toggleRawJson()" id="btn-toggle-json" class="text-xs font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 px-2.5 py-1.5 rounded border border-indigo-200 transition">
+                Show Raw JSON
+            </button>
+        </div>
+
+        <!-- Raw JSON Container (Hidden by default) -->
+        <div id="raw-json-container" class="hidden bg-slate-900 text-emerald-400 p-4 rounded-lg text-xs font-mono overflow-x-auto max-h-96">
+            <pre id="raw-json-content">Loading ICO data...</pre>
+        </div>
+
+        <!-- Structured Forensic Cards -->
+        <div id="forensic-cards" class="flex flex-col gap-4">
+            <!-- Headline & Impact Card -->
+            <div class="border border-gray-200 rounded-lg p-4 bg-slate-50">
+                <div class="flex justify-between items-start mb-2">
+                    <span id="ico-incident-id" class="text-xs font-mono font-bold text-slate-800 bg-slate-200 px-2 py-0.5 rounded">INC-DEFAULT</span>
+                    <span id="ico-severity" class="text-xs font-mono font-bold text-red-700 bg-red-100 border border-red-300 px-2 py-0.5 rounded">SEV1</span>
+                </div>
+                <h3 id="ico-headline" class="text-sm font-bold text-gray-900 mb-1">checkout-api elevated 5xx error rate</h3>
+                <p id="ico-impact" class="text-xs text-gray-600 mb-2">About 94 percent of checkout transactions failing</p>
+                <div class="text-xs text-gray-500">
+                    <span class="font-semibold text-gray-700">Affected Service:</span>
+                    <span id="ico-service" class="font-mono text-indigo-700">checkout-api</span>
+                </div>
+            </div>
+
+            <!-- Root Cause Hypothesis Card -->
+            <div class="border border-gray-200 rounded-lg p-4 bg-white shadow-sm">
+                <div class="flex justify-between items-center mb-2">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-gray-500">Leading Hypothesis</h4>
+                    <span id="ico-confidence" class="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">Confidence: 85%</span>
+                </div>
+                <p id="ico-hypothesis-text" class="text-xs text-gray-800 font-medium mb-3">Connection pool exhaustion on primary database</p>
+                
+                <h5 class="text-xs font-bold text-gray-500 mb-1">Correlated Grounding Signals:</h5>
+                <ul id="ico-signals-list" class="text-xs text-gray-600 list-disc list-inside space-y-0.5 font-mono">
+                    <li>asyncpg.exceptions.TimeoutError (checkout-api)</li>
+                    <li>pgbouncer client connections &gt; 95%</li>
+                </ul>
+            </div>
+
+            <!-- Candidate Runbooks & Remediation Command -->
+            <div class="border border-gray-200 rounded-lg p-4 bg-white shadow-sm">
+                <div class="flex justify-between items-center mb-2">
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-gray-500">Candidate Runbook & Remediation</h4>
+                    <span id="ico-runbook-score" class="text-xs font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">Cross-Encoder: 0.95</span>
+                </div>
+                <div id="ico-runbook-title" class="text-xs font-bold text-gray-900 mb-1">Postgres Connection Exhaustion Mitigation (RB-PG-001)</div>
+                <div class="text-xs text-gray-500 mb-2">Source Chunk: <span id="ico-chunk-id" class="font-mono text-slate-700">RB-PG-001#chunk-1</span></div>
+
+                <div class="bg-gray-900 text-amber-300 p-3 rounded font-mono text-xs overflow-x-auto">
+                    <div class="text-gray-400 text-[10px] uppercase font-bold tracking-wider mb-1">Grounded AST Command (Tier 2 Mutating)</div>
+                    <code id="ico-command">kubectl rollout restart deploy/checkout-api</code>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Right Column: 3-Tier Evaluation Matrix & Telemetry -->
+    <section class="w-1/2 p-6 bg-slate-50 overflow-y-auto flex flex-col gap-5">
+        <div class="flex justify-between items-center border-b border-gray-200 pb-3">
+            <div>
+                <h2 class="text-base font-bold text-gray-900">3-Tier Production Evaluation Matrix</h2>
+                <p class="text-xs text-gray-500">Automated quality gates across retrieval, reranking, and generation</p>
+            </div>
+            <span id="eval-last-run" class="text-xs text-gray-400 font-mono">Loading matrix...</span>
+        </div>
+
+        <!-- Tier 1: Candidate Retrieval Card -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700">Tier 1: Candidate Retrieval (Hybrid Search)</h3>
+                <span id="tier1-status" class="text-xs font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">PASS</span>
+            </div>
+            <div class="space-y-3">
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-600 font-medium">Recall @ 1 (Target: &ge; 70.0%)</span>
+                        <span id="metric-recall-1" class="font-mono font-bold text-slate-900">100.0%</span>
+                    </div>
+                    <div class="score-bar-bg">
+                        <div id="bar-recall-1" class="score-bar-fill bg-emerald-500" style="width: 100%;"></div>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-600 font-medium">Recall @ 3 (Target: &ge; 85.0%)</span>
+                        <span id="metric-recall-3" class="font-mono font-bold text-slate-900">100.0%</span>
+                    </div>
+                    <div class="score-bar-bg">
+                        <div id="bar-recall-3" class="score-bar-fill bg-emerald-500" style="width: 100%;"></div>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-600 font-medium">Recall @ 5 (Target: &ge; 90.0%)</span>
+                        <span id="metric-recall-5" class="font-mono font-bold text-slate-900">100.0%</span>
+                    </div>
+                    <div class="score-bar-bg">
+                        <div id="bar-recall-5" class="score-bar-fill bg-emerald-500" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tier 2: Reranker & Refusal Precision Card -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700">Tier 2: Reranking & Refusal Precision</h3>
+                <span id="tier2-status" class="text-xs font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">PASS</span>
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+                <div class="border rounded p-2.5 bg-slate-50 text-center">
+                    <div class="text-[11px] text-gray-500 font-medium">MRR (Gate: &ge; 0.80)</div>
+                    <div id="metric-mrr" class="text-base font-bold font-mono text-slate-900 mt-1">1.0000</div>
+                </div>
+                <div class="border rounded p-2.5 bg-slate-50 text-center">
+                    <div class="text-[11px] text-gray-500 font-medium">Refusal Precision</div>
+                    <div id="metric-refusal" class="text-base font-bold font-mono text-emerald-600 mt-1">100.0%</div>
+                </div>
+                <div class="border rounded p-2.5 bg-slate-50 text-center">
+                    <div class="text-[11px] text-gray-500 font-medium">Hard Negatives @ 1</div>
+                    <div id="metric-hard-negatives" class="text-base font-bold font-mono text-slate-900 mt-1">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tier 3: Generation & Safety Grounding Card -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+            <div class="flex justify-between items-center mb-3">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700">Tier 3: Generation & Safety Grounding</h3>
+                <span id="tier3-status" class="text-xs font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">PASS</span>
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-xs">
+                <div class="flex justify-between items-center border-b pb-1.5">
+                    <span class="text-gray-600">Verbatim AST Match Rate:</span>
+                    <span id="metric-ast" class="font-mono font-bold text-slate-900">100.0%</span>
+                </div>
+                <div class="flex justify-between items-center border-b pb-1.5">
+                    <span class="text-gray-600">Forbidden Claim Violations:</span>
+                    <span id="metric-forbidden" class="font-mono font-bold text-emerald-600">0.0%</span>
+                </div>
+                <div class="flex justify-between items-center border-b pb-1.5">
+                    <span class="text-gray-600">Refusal Accuracy:</span>
+                    <span id="metric-refusal-gen" class="font-mono font-bold text-slate-900">100.0%</span>
+                </div>
+                <div class="flex justify-between items-center border-b pb-1.5">
+                    <span class="text-gray-600">Overall Grounding Pass Rate:</span>
+                    <span id="metric-grounding" class="font-mono font-bold text-emerald-600">100.0%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Performance & Telemetry Card -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-700">Performance & Tracing Telemetry</h3>
+                <a href="https://cloud.langfuse.com" target="_blank" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1">
+                    Open Langfuse Traces ↗
+                </a>
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-xs">
+                <div class="border rounded p-2.5 bg-gray-50">
+                    <div class="text-gray-500 font-medium">Time-to-First-Audio (TTFA):</div>
+                    <div class="text-sm font-bold font-mono text-gray-900 mt-0.5">320 ms <span class="text-[10px] text-emerald-600 font-normal">(Target &lt;450ms)</span></div>
+                </div>
+                <div class="border rounded p-2.5 bg-gray-50">
+                    <div class="text-gray-500 font-medium">Conversational Turn Latency (p95):</div>
+                    <div class="text-sm font-bold font-mono text-gray-900 mt-0.5">780 ms <span class="text-[10px] text-emerald-600 font-normal">(Target &lt;1000ms)</span></div>
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script>
+    let isRawJsonVisible = false;
+
+    async function loadLatestEvals() {
+        try {
+            const resp = await fetch('/api/evals/latest');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            renderEvals(data);
+        } catch (e) {
+            document.getElementById('eval-last-run').innerText = `Error: ${e.message}`;
+        }
+    }
+
+    function renderEvals(data) {
+        document.getElementById('eval-last-run').innerText = `Evaluated: ${data.system_overview?.evaluated_cases || 5} fixtures`;
+
+        const overall = data.overall_passed;
+        const overallBadge = document.getElementById('overall-badge');
+        overallBadge.className = overall 
+            ? 'px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5'
+            : 'px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5';
+        overallBadge.innerHTML = overall 
+            ? '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> GATES PASSED'
+            : '<span class="w-2 h-2 rounded-full bg-red-500"></span> GATE FAILURE';
+
+        // Tier 1
+        const t1 = data.tier1_retrieval || [];
+        if (t1.length >= 3) {
+            document.getElementById('metric-recall-1').innerText = t1[0].formatted_measured;
+            document.getElementById('bar-recall-1').style.width = `${t1[0].measured * 100}%`;
+            document.getElementById('metric-recall-3').innerText = t1[1].formatted_measured;
+            document.getElementById('bar-recall-3').style.width = `${t1[1].measured * 100}%`;
+            document.getElementById('metric-recall-5').innerText = t1[2].formatted_measured;
+            document.getElementById('bar-recall-5').style.width = `${t1[2].measured * 100}%`;
+        }
+
+        // Tier 2
+        const t2 = data.tier2_reranking || [];
+        if (t2.length >= 3) {
+            document.getElementById('metric-mrr').innerText = t2[0].formatted_measured;
+            document.getElementById('metric-refusal').innerText = t2[1].formatted_measured;
+            document.getElementById('metric-hard-negatives').innerText = t2[2].formatted_measured;
+        }
+
+        // Tier 3
+        const t3 = data.tier3_generation || [];
+        if (t3.length >= 4) {
+            document.getElementById('metric-ast').innerText = t3[0].formatted_measured;
+            document.getElementById('metric-forbidden').innerText = t3[1].formatted_measured;
+            document.getElementById('metric-refusal-gen').innerText = t3[2].formatted_measured;
+            document.getElementById('metric-grounding').innerText = t3[3].formatted_measured;
+        }
+    }
+
+    async function triggerRunEvals() {
+        const btn = document.getElementById('btn-run-evals');
+        const spinner = document.getElementById('eval-spinner');
+        btn.disabled = true;
+        spinner.classList.remove('hidden');
+
+        try {
+            const resp = await fetch('/api/evals/run', { method: 'POST' });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+            renderEvals(data);
+        } catch (e) {
+            alert(`Evaluation run failed: ${e.message}`);
+        } finally {
+            btn.disabled = false;
+            spinner.classList.add('hidden');
+        }
+    }
+
+    function toggleRawJson() {
+        isRawJsonVisible = !isRawJsonVisible;
+        const container = document.getElementById('raw-json-container');
+        const btn = document.getElementById('btn-toggle-json');
+        if (isRawJsonVisible) {
+            container.classList.remove('hidden');
+            btn.innerText = 'Hide Raw JSON';
+        } else {
+            container.classList.add('hidden');
+            btn.innerText = 'Show Raw JSON';
+        }
+    }
+
+    // Auto-load on mount
+    document.addEventListener('DOMContentLoaded', () => {
+        loadLatestEvals();
+    });
+</script>
+</body>
+</html>

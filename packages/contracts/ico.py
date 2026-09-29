@@ -36,23 +36,18 @@ class IncidentContextObject(BaseModel):
 
     def to_voice_brief(self) -> str:
         """
-        Returns a concise, 2-sentence conversational spoken summary formatted
-        for streaming TTS. Avoids raw markdown, backticks, or JSON.
+        Returns a natural, empathetic, and concise conversational spoken summary
+        formatted for speech synthesis and audio delivery. Avoids raw markdown,
+        backticks, or JSON formatting.
         """
         # Remove any Markdown or technical formatting that TTS might stumble on.
-        clean_headline = self.headline.replace("`", "").strip()
-        clean_impact = self.impact.replace("`", "").replace("~", "About ").strip()
-        clean_hypothesis = self.hypothesis.text.replace("`", "").strip()
-
-        # Ensure punctuation for sentence boundaries.
-        if not clean_headline.endswith("."):
-            clean_headline += "."
-        if not clean_impact.endswith("."):
-            clean_impact += "."
-        if not clean_hypothesis.endswith("."):
-            clean_hypothesis += "."
+        clean_headline = self.headline.replace("`", "").strip().rstrip(".")
+        clean_impact = self.impact.replace("`", "").replace("~", "About ").strip().rstrip(".")
+        clean_hypothesis = self.hypothesis.text.replace("`", "").strip().rstrip(".")
+        service_target = f" on {self.service}" if self.service else ""
 
         return (
-            f"We are tracking a {self.severity} incident: {clean_headline} "
-            f"{clean_impact} The leading hypothesis is {clean_hypothesis}"
+            f"Hello, sorry to wake you up. We are tracking a {self.severity} incident"
+            f"{service_target}: {clean_headline}. Specifically, {clean_impact}. "
+            f"The leading hypothesis is {clean_hypothesis}. Would you like me to run the recommended remediation?"
         )

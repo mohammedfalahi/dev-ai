@@ -3,22 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>On-call Voice Console</title>
+    <title>On-call Voice — Operations & Chaos Console</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         .chat-container {
-            height: calc(100vh - 250px);
+            height: calc(100vh - 340px);
             overflow-y: auto;
         }
         .message {
-            margin-bottom: 1rem;
-            padding: 10px 15px;
+            margin-bottom: 0.75rem;
+            padding: 10px 14px;
             border-radius: 8px;
             max-width: 85%;
+            font-size: 0.925rem;
+            line-height: 1.4;
         }
         .message.agent {
             background-color: #f3f4f6;
+            color: #1f2937;
             align-self: flex-start;
+            border-left: 3px solid #3b82f6;
         }
         .message.user {
             background-color: #2563eb;
@@ -26,88 +30,200 @@
             align-self: flex-end;
             margin-left: auto;
         }
+        .message.system {
+            background-color: #fef3c7;
+            color: #92400e;
+            align-self: center;
+            font-size: 0.8rem;
+            border: 1px dashed #f59e0b;
+        }
     </style>
 </head>
 <body class="bg-gray-100 font-sans h-screen flex flex-col">
 
-<header class="bg-white shadow-sm p-4 flex justify-between items-center">
-    <h1 class="text-xl font-bold text-gray-800">On-call Voice Developer Console</h1>
+<!-- Top Navigation Bar -->
+<header class="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center shadow-sm">
+    <div class="flex items-center gap-6">
+        <div class="flex items-center gap-2">
+            <span class="text-xl">🎙️</span>
+            <span class="font-bold text-gray-900 text-lg">On-call Voice</span>
+            <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-0.5 rounded">Console v1.0</span>
+        </div>
+        <nav class="flex space-x-1">
+            <a href="/" class="px-3 py-1.5 text-sm font-semibold text-blue-700 bg-blue-50 rounded-md">1. Operations & Chaos</a>
+            <a href="/triage" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-md flex items-center gap-1">
+                2. Triage & Eval Hub
+                <span class="text-xs text-gray-400">→</span>
+            </a>
+        </nav>
+    </div>
     <div class="flex items-center gap-4">
-        <span class="text-sm text-gray-500 font-medium">Latency Budget: &lt;800ms</span>
-        <div id="latency-badge" class="px-3 py-1 bg-gray-200 text-gray-700 rounded-full text-sm font-bold">
+        <div class="flex items-center gap-2 text-xs font-medium text-gray-500">
+            <span>Latency Target:</span>
+            <span class="font-bold text-gray-700">&lt;800ms</span>
+        </div>
+        <div id="latency-badge" class="px-2.5 py-1 bg-gray-200 text-gray-700 rounded-full text-xs font-mono font-bold">
             0ms
+        </div>
+        <div id="call-status-badge" class="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-semibold flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            STANDBY
         </div>
     </div>
 </header>
 
+<!-- Main 2-Column Dashboard Layout -->
 <main class="flex-1 flex overflow-hidden">
-    <!-- Left Column: Broken Shop Controls -->
-    <section class="w-1/3 p-6 bg-white border-r overflow-y-auto flex flex-col gap-6">
+
+    <!-- Left Column: Chaos Trigger, Service Badges & Deduplication -->
+    <section class="w-1/3 p-6 bg-white border-r border-gray-200 overflow-y-auto flex flex-col gap-6">
         <div>
-            <h2 class="text-lg font-bold mb-4">Labs / Broken Shop Controls</h2>
-            <div class="flex flex-col gap-3">
-                <button onclick="triggerFault('db-pool-exhaustion')" class="bg-red-100 hover:bg-red-200 text-red-700 py-2 px-4 rounded font-medium text-left flex justify-between">
-                    <span>💥 Exhaust DB Pool</span>
-                    <span class="text-sm">checkout-api</span>
-                </button>
-                <button onclick="triggerFault('redis-oom')" class="bg-orange-100 hover:bg-orange-200 text-orange-700 py-2 px-4 rounded font-medium text-left flex justify-between">
-                    <span>💥 Trigger Redis OOM</span>
-                    <span class="text-sm">redis-cache</span>
-                </button>
-                <button onclick="triggerFault('edge-502')" class="bg-yellow-100 hover:bg-yellow-200 text-yellow-700 py-2 px-4 rounded font-medium text-left flex justify-between">
-                    <span>💥 Edge Proxy 502</span>
-                    <span class="text-sm">edge-proxy</span>
-                </button>
-                <button onclick="triggerFault('webhook-loop')" class="bg-pink-100 hover:bg-pink-200 text-pink-700 py-2 px-4 rounded font-medium text-left flex justify-between">
-                    <span>💥 Payment Webhook Storm</span>
-                    <span class="text-sm">payment-gateway</span>
-                </button>
-                <button onclick="triggerFault('db-deadlock')" class="bg-red-100 hover:bg-red-200 text-red-700 py-2 px-4 rounded font-medium text-left flex justify-between">
-                    <span>💥 DB Row Deadlock</span>
-                    <span class="text-sm">checkout-api</span>
-                </button>
-                <button onclick="triggerFault('undocumented-anomaly')" class="bg-purple-100 hover:bg-purple-200 text-purple-700 py-2 px-4 rounded font-medium text-left flex justify-between">
-                    <span>👽 Undocumented Anomaly</span>
-                    <span class="text-sm">unknown-service</span>
-                </button>
-                <button onclick="triggerFault('reset')" class="bg-green-100 hover:bg-green-200 text-green-700 py-2 px-4 rounded font-medium text-left flex justify-between mt-4">
-                    <span>🔄 Reset System</span>
-                    <span class="text-sm">healthy</span>
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-sm font-bold uppercase tracking-wider text-gray-500">Chaos Injection (broken-shop)</h2>
+                <span class="text-xs text-gray-400">labs/broken_shop</span>
+            </div>
+            <div class="flex flex-col gap-2.5">
+                <div id="fault-container-db-pool-exhaustion">
+                    <button onclick="triggerFault('db-pool-exhaustion')" class="w-full bg-red-50 hover:bg-red-100 border border-red-200 text-red-800 py-2.5 px-3.5 rounded-lg font-medium text-left flex justify-between items-center transition">
+                        <div>
+                            <div class="text-sm font-semibold">💥 Exhaust DB Pool</div>
+                            <div class="text-xs text-red-600">asyncpg.exceptions.TimeoutError</div>
+                        </div>
+                        <span class="text-xs bg-red-200 text-red-900 px-2 py-0.5 rounded font-mono">SEV1</span>
+                    </button>
+                </div>
+                <div id="fault-container-redis-oom">
+                    <button onclick="triggerFault('redis-oom')" class="w-full bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-800 py-2.5 px-3.5 rounded-lg font-medium text-left flex justify-between items-center transition">
+                        <div>
+                            <div class="text-sm font-semibold">💥 Trigger Redis OOM</div>
+                            <div class="text-xs text-orange-600">OOM command not allowed when used memory > maxmemory</div>
+                        </div>
+                        <span class="text-xs bg-orange-200 text-orange-900 px-2 py-0.5 rounded font-mono">SEV2</span>
+                    </button>
+                </div>
+                <div id="fault-container-edge-502">
+                    <button onclick="triggerFault('edge-502')" class="w-full bg-yellow-50 hover:bg-yellow-100 border border-yellow-200 text-yellow-800 py-2.5 px-3.5 rounded-lg font-medium text-left flex justify-between items-center transition">
+                        <div>
+                            <div class="text-sm font-semibold">💥 Edge Proxy 502 Bad Gateway</div>
+                            <div class="text-xs text-yellow-700">upstream connect error or disconnect/reset before headers</div>
+                        </div>
+                        <span class="text-xs bg-yellow-200 text-yellow-900 px-2 py-0.5 rounded font-mono">SEV1</span>
+                    </button>
+                </div>
+                <div id="fault-container-undocumented-anomaly">
+                    <button onclick="triggerFault('undocumented-anomaly')" class="w-full bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-800 py-2.5 px-3.5 rounded-lg font-medium text-left flex justify-between items-center transition">
+                        <div>
+                            <div class="text-sm font-semibold">👽 Undocumented Anomaly (Refusal)</div>
+                            <div class="text-xs text-purple-600">Quantum entanglement packet loss on edge router</div>
+                        </div>
+                        <span class="text-xs bg-purple-200 text-purple-900 px-2 py-0.5 rounded font-mono">SEV3</span>
+                    </button>
+                </div>
+                <button onclick="triggerFault('reset')" class="bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-700 py-2 px-3 rounded-lg text-sm font-medium flex justify-between items-center transition mt-1">
+                    <span>🔄 Reset Services & Session</span>
+                    <span class="text-xs text-gray-400 font-mono">healthy</span>
                 </button>
             </div>
         </div>
 
+        <!-- Service Health Badges -->
         <div>
-            <h2 class="text-lg font-bold mb-2">Slow Brain Output (ICO)</h2>
-            <p class="text-xs text-gray-500 mb-2">Validated Incident Context Object generated via retrieval & reasoning.</p>
-            <pre id="ico-viewer" class="bg-gray-900 text-green-400 p-4 rounded text-xs overflow-x-auto" style="max-height: 400px;">
-// Trigger a fault to generate ICO...
-            </pre>
+            <h2 class="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2.5">Service Health</h2>
+            <div class="grid grid-cols-3 gap-2">
+                <div class="border rounded p-2 text-center bg-gray-50">
+                    <div id="status-checkout" class="w-2.5 h-2.5 rounded-full bg-emerald-500 mx-auto mb-1"></div>
+                    <div class="text-xs font-medium text-gray-700">checkout-api</div>
+                </div>
+                <div class="border rounded p-2 text-center bg-gray-50">
+                    <div id="status-redis" class="w-2.5 h-2.5 rounded-full bg-emerald-500 mx-auto mb-1"></div>
+                    <div class="text-xs font-medium text-gray-700">redis-cache</div>
+                </div>
+                <div class="border rounded p-2 text-center bg-gray-50">
+                    <div id="status-proxy" class="w-2.5 h-2.5 rounded-full bg-emerald-500 mx-auto mb-1"></div>
+                    <div class="text-xs font-medium text-gray-700">edge-proxy</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gateway Deduplication Metrics -->
+        <div class="bg-slate-50 border border-slate-200 rounded-lg p-3.5">
+            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-600 mb-2">Gateway Signal Ingestion & Dedupe</h2>
+            <div class="flex justify-between items-center text-xs text-slate-700 mb-1">
+                <span>Alerts Ingested:</span>
+                <span id="stat-alerts" class="font-mono font-bold text-slate-900">0</span>
+            </div>
+            <div class="flex justify-between items-center text-xs text-slate-700 mb-1">
+                <span>Incidents Created:</span>
+                <span id="stat-incidents" class="font-mono font-bold text-slate-900">0</span>
+            </div>
+            <div class="flex justify-between items-center text-xs text-slate-700">
+                <span>Deduplication Ratio:</span>
+                <span id="stat-ratio" class="font-mono font-bold text-emerald-600">100%</span>
+            </div>
+        </div>
+
+        <!-- Active Incident Summary Preview -->
+        <div class="border border-gray-200 rounded-lg p-3.5 bg-white">
+            <div class="flex justify-between items-center mb-1.5">
+                <span id="summary-id" class="text-xs font-mono font-bold text-gray-800">NO ACTIVE INCIDENT</span>
+                <span id="summary-sev" class="text-xs font-mono font-semibold text-gray-400">---</span>
+            </div>
+            <div id="summary-headline" class="text-xs text-gray-600 italic">Trigger a fault to generate context...</div>
+            <div class="mt-2.5 pt-2 border-t flex justify-end">
+                <a href="/triage" class="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
+                    Inspect Full ICO in Triage Hub →
+                </a>
+            </div>
         </div>
     </section>
 
-    <!-- Right Column: Fast Brain Simulator -->
+    <!-- Right Column: Live Call & Policy Gate -->
     <section class="w-2/3 flex flex-col bg-gray-50">
-        <div class="p-4 border-b bg-white">
-            <h2 class="text-lg font-bold">Fast Brain Voice Simulator (Text Mode)</h2>
-            <p class="text-sm text-gray-500">Communicating using pre-loaded ICO without external DB/RAG lookups.</p>
-        </div>
-        
-        <div id="chat-feed" class="flex-1 p-6 chat-container flex flex-col gap-2">
-            <!-- Messages go here -->
+        <!-- Live Call & Policy Header -->
+        <div class="p-4 bg-white border-b border-gray-200 flex justify-between items-center">
+            <div>
+                <h2 class="text-base font-bold text-gray-900">Live Voice Session & Grounded Policy Gate</h2>
+                <p class="text-xs text-gray-500">LiveKit Multimodal Audio • Gemini Live • Sub-second Latency</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-gray-500">Policy:</span>
+                    <span id="policy-badge" class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-gray-100 text-gray-600 border border-gray-300">
+                        NONE
+                    </span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-gray-500">Gate:</span>
+                    <span id="confirmation-badge" class="px-2 py-0.5 rounded text-xs font-bold font-mono bg-gray-100 text-gray-600 border border-gray-300">
+                        STANDBY
+                    </span>
+                </div>
+            </div>
         </div>
 
-        <div class="p-4 bg-white border-t">
-            <div class="flex gap-2 mb-3 overflow-x-auto pb-2">
-                <button onclick="sendQuickReply('What caused this?')" class="whitespace-nowrap px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded-full hover:bg-blue-200 transition">What caused this?</button>
-                <button onclick="sendQuickReply('What is the blast radius?')" class="whitespace-nowrap px-3 py-1 bg-blue-100 text-blue-700 text-sm rounded-full hover:bg-blue-200 transition">What is the blast radius?</button>
-                <button onclick="sendQuickReply('confirm')" class="whitespace-nowrap px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded-full hover:bg-purple-200 font-bold transition">confirm</button>
-                <button onclick="sendQuickReply('yeah sure')" class="whitespace-nowrap px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded-full hover:bg-gray-300 transition">yeah sure (casual)</button>
+        <!-- Chat / Spoken Transcript Stream -->
+        <div id="chat-feed" class="flex-1 p-6 chat-container flex flex-col gap-2">
+            <div class="message system text-center py-2 px-3 mx-auto">
+                Select a fault on the left to wake up the system and dispatch an outbound on-call briefing.
+            </div>
+        </div>
+
+        <!-- Quick Assent Replies & Input -->
+        <div class="p-4 bg-white border-t border-gray-200">
+            <div class="flex gap-2 mb-3 overflow-x-auto pb-1 text-xs">
+                <span class="text-gray-400 self-center font-medium pr-1">Spoken Assent:</span>
+                <button onclick="sendQuickReply('What caused this?')" class="whitespace-nowrap px-3 py-1 bg-slate-100 text-slate-700 rounded-full hover:bg-slate-200 font-medium transition">What caused this?</button>
+                <button onclick="sendQuickReply('What is the blast radius?')" class="whitespace-nowrap px-3 py-1 bg-slate-100 text-slate-700 rounded-full hover:bg-slate-200 font-medium transition">What is the blast radius?</button>
+                <button onclick="sendQuickReply('yeah sure, go ahead')" class="whitespace-nowrap px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full hover:bg-emerald-200 font-bold transition">"yeah sure, go ahead" (Assent)</button>
+                <button onclick="sendQuickReply('confirm')" class="whitespace-nowrap px-3 py-1 bg-purple-100 text-purple-800 rounded-full hover:bg-purple-200 font-bold transition">"confirm" (Keyword)</button>
+                <button onclick="sendQuickReply('no don\'t do that')" class="whitespace-nowrap px-3 py-1 bg-red-100 text-red-800 rounded-full hover:bg-red-200 font-medium transition">"no don't" (Reject)</button>
             </div>
             
             <form onsubmit="handleChatSubmit(event)" class="flex gap-2">
-                <input type="text" id="chat-input" class="flex-1 border border-gray-300 rounded px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Speak to the agent..." disabled>
-                <button type="submit" id="chat-submit" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>Send</button>
+                <input type="text" id="chat-input" class="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Speak or type to the on-call agent..." disabled>
+                <button type="submit" id="chat-submit" class="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-700 text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition" disabled>
+                    Send Spoken Turn
+                </button>
             </form>
         </div>
     </section>
@@ -117,113 +233,291 @@
     const chatFeed = document.getElementById('chat-feed');
     const chatInput = document.getElementById('chat-input');
     const chatSubmit = document.getElementById('chat-submit');
-    const icoViewer = document.getElementById('ico-viewer');
     const latencyBadge = document.getElementById('latency-badge');
+    const callStatusBadge = document.getElementById('call-status-badge');
+    const policyBadge = document.getElementById('policy-badge');
+    const confirmationBadge = document.getElementById('confirmation-badge');
+    const summaryId = document.getElementById('summary-id');
+    const summarySev = document.getElementById('summary-sev');
+    const summaryHeadline = document.getElementById('summary-headline');
+    const statAlerts = document.getElementById('stat-alerts');
+    const statIncidents = document.getElementById('stat-incidents');
+    const statRatio = document.getElementById('stat-ratio');
 
-    function appendMessage(sender, text) {
-        const div = document.createElement('div');
-        div.className = `message ${sender} shadow-sm`;
-        div.textContent = text;
-        chatFeed.appendChild(div);
-        chatFeed.scrollTop = chatFeed.scrollHeight;
+    let totalAlerts = 0;
+    let totalIncidents = 0;
+    let activeFaultName = null;
+    let pollInterval = null;
+
+    const FAULT_DEFINITIONS = {
+        'db-pool-exhaustion': {
+            title: '💥 Exhaust DB Pool',
+            desc: 'asyncpg.exceptions.TimeoutError',
+            sev: 'SEV1',
+            sevClass: 'bg-red-200 text-red-900',
+            btnClass: 'w-full bg-red-50 hover:bg-red-100 border border-red-200 text-red-800'
+        },
+        'redis-oom': {
+            title: '💥 Trigger Redis OOM',
+            desc: 'OOM command not allowed when used memory > maxmemory',
+            sev: 'SEV2',
+            sevClass: 'bg-orange-200 text-orange-900',
+            btnClass: 'w-full bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-800'
+        },
+        'edge-502': {
+            title: '💥 Edge Proxy 502 Bad Gateway',
+            desc: 'upstream connect error or disconnect/reset before headers',
+            sev: 'SEV1',
+            sevClass: 'bg-yellow-200 text-yellow-900',
+            btnClass: 'w-full bg-yellow-50 hover:bg-yellow-100 border border-yellow-200 text-yellow-800'
+        },
+        'undocumented-anomaly': {
+            title: '👽 Undocumented Anomaly (Refusal)',
+            desc: 'Quantum entanglement packet loss on edge router',
+            sev: 'SEV3',
+            sevClass: 'bg-purple-200 text-purple-900',
+            btnClass: 'w-full bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-800'
+        }
+    };
+
+    function renderFaultCardIdle(faultId) {
+        const config = FAULT_DEFINITIONS[faultId];
+        if (!config) return;
+        const container = document.getElementById(`fault-container-${faultId}`);
+        if (!container) return;
+        container.innerHTML = `
+            <button onclick="triggerFault('${faultId}')" class="${config.btnClass} py-2.5 px-3.5 rounded-lg font-medium text-left flex justify-between items-center transition">
+                <div>
+                    <div class="text-sm font-semibold">${config.title}</div>
+                    <div class="text-xs text-red-600">${config.desc}</div>
+                </div>
+                <span class="text-xs ${config.sevClass} px-2 py-0.5 rounded font-mono">${config.sev}</span>
+            </button>
+        `;
     }
 
-    function updateLatency(ms) {
-        latencyBadge.textContent = `${ms.toFixed(0)}ms`;
-        if (ms < 800) {
-            latencyBadge.className = 'px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-bold';
-        } else {
-            latencyBadge.className = 'px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-bold';
+    function renderFaultCardResolved(faultId) {
+        const container = document.getElementById(`fault-container-${faultId}`);
+        if (!container) return;
+        container.innerHTML = `
+            <div class="flex items-center gap-2 w-full">
+                <div class="flex-1 bg-emerald-50 border border-emerald-300 text-emerald-900 py-2.5 px-3.5 rounded-lg font-medium text-left flex justify-between items-center shadow-sm">
+                    <div>
+                        <div class="text-sm font-bold flex items-center gap-1.5">
+                            <span>✅ Problem Solved</span>
+                            <span class="text-xs bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded font-mono font-bold">RESOLVED</span>
+                        </div>
+                        <div class="text-xs text-emerald-700 font-normal">Remediation verified • State healthy</div>
+                    </div>
+                </div>
+                <button onclick="resetFault('${faultId}')" class="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 py-2.5 px-3 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0" title="Reset State">
+                    <span>🔄 Reset State</span>
+                </button>
+            </div>
+        `;
+    }
+
+    function startPolling() {
+        stopPolling();
+        pollInterval = setInterval(pollFaultStatus, 1500);
+    }
+
+    function stopPolling() {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+    }
+
+    async function pollFaultStatus() {
+        try {
+            const resp = await fetch('/api/faults/status');
+            if (!resp.ok) return;
+            const data = await resp.json();
+
+            if (data.fault_states) {
+                for (const [fId, fState] of Object.entries(data.fault_states)) {
+                    if (fState === 'RESOLVED') {
+                        renderFaultCardResolved(fId);
+                    } else if (fState === 'IDLE') {
+                        renderFaultCardIdle(fId);
+                    }
+                }
+            }
+
+            if (data.active_fault_status === 'RESOLVED') {
+                confirmationBadge.innerText = 'APPROVED & DISPATCHED';
+                confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-emerald-100 text-emerald-800 border border-emerald-400';
+                callStatusBadge.className = 'px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-semibold flex items-center gap-1.5';
+                callStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> RESOLVED';
+            }
+        } catch (e) {
+            // Polling fails gracefully
+        }
+    }
+
+    async function resetFault(faultId) {
+        appendMessage('system', `Resetting fault state for: ${faultId || 'all'}...`);
+        try {
+            const resp = await fetch('/api/faults/reset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(faultId ? { fault_id: faultId } : {})
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+
+            if (faultId) {
+                renderFaultCardIdle(faultId);
+            } else {
+                Object.keys(FAULT_DEFINITIONS).forEach(id => renderFaultCardIdle(id));
+            }
+
+            appendMessage('system', 'System state reset to healthy.');
+            chatFeed.innerHTML = '<div class="message system text-center py-2 px-3 mx-auto">Select a fault on the left to wake up the system and dispatch an outbound on-call briefing.</div>';
+            chatInput.disabled = true;
+            chatSubmit.disabled = true;
+            callStatusBadge.className = 'px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-semibold flex items-center gap-1.5';
+            callStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> STANDBY';
+            policyBadge.innerText = 'NONE';
+            policyBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-gray-100 text-gray-600 border border-gray-300';
+            confirmationBadge.innerText = 'STANDBY';
+            confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-gray-100 text-gray-600 border border-gray-300';
+            summaryId.innerText = 'NO ACTIVE INCIDENT';
+            summarySev.innerText = '---';
+            summaryHeadline.innerText = 'Trigger a fault to generate context...';
+
+            stopPolling();
+        } catch (e) {
+            appendMessage('system', `Reset failed: ${e.message}`);
         }
     }
 
     async function triggerFault(faultName) {
-        chatInput.disabled = true;
-        chatSubmit.disabled = true;
-        chatFeed.innerHTML = '';
-        icoViewer.textContent = 'Investigating incident and generating ICO (Slow Brain)...';
-        
-        appendMessage('agent', 'System alert triggered. Running Investigator workflow...');
+        if (faultName === 'reset') {
+            await resetFault(null);
+            return;
+        }
 
+        activeFaultName = faultName;
+        appendMessage('system', `Dispatching drill trigger for fault: ${faultName}...`);
+        
         try {
-            const start = performance.now();
-            const res = await fetch(`/api/faults/${faultName}`, { method: 'POST' });
-            const data = await res.json();
-            
-            if (faultName === 'reset') {
-                icoViewer.textContent = JSON.stringify(data, null, 2);
-                appendMessage('agent', 'System reset.');
-                return;
+            const resp = await fetch(`/api/faults/${faultName}`, { method: 'POST' });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const data = await resp.json();
+
+            totalAlerts++;
+            totalIncidents++;
+            updateDedupeStats();
+
+            // Update call badge
+            callStatusBadge.className = 'px-2.5 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-semibold flex items-center gap-1.5';
+            callStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span> CONNECTED';
+
+            // Update Policy Gate Badge
+            if (data.tier === 'TIER_2_MUTATING') {
+                policyBadge.innerText = 'TIER 2: MUTATING';
+                policyBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-red-100 text-red-800 border border-red-300';
+                confirmationBadge.innerText = 'AWAITING ASSENT';
+                confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-amber-100 text-amber-800 border border-amber-300';
+            } else if (data.tier === 'TIER_1_READ_ONLY') {
+                policyBadge.innerText = 'TIER 1: READ ONLY';
+                policyBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-green-100 text-green-800 border border-green-300';
+                confirmationBadge.innerText = 'AUTO APPROVED';
+                confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-green-100 text-green-800 border border-green-300';
             }
 
-            icoViewer.textContent = JSON.stringify(data.ico, null, 2);
+            // Update Incident Summary
+            summaryId.innerText = data.ico.incident_id;
+            summarySev.innerText = data.ico.severity;
+            summaryHeadline.innerText = data.ico.headline;
+
+            // Render Agent opening greeting
             appendMessage('agent', data.greeting);
-            
-            const ms = performance.now() - start;
-            // Investigator is allowed 60s, so we don't color code this latency the same as Fast Brain
-            latencyBadge.textContent = `Inv: ${ms.toFixed(0)}ms`;
-            latencyBadge.className = 'px-3 py-1 bg-gray-200 text-gray-700 rounded-full text-sm font-bold';
-            
+
             chatInput.disabled = false;
             chatSubmit.disabled = false;
             chatInput.focus();
-        } catch (err) {
-            appendMessage('agent', `Error: ${err.message}`);
-            icoViewer.textContent = 'Error connecting to console backend.';
+
+            startPolling();
+        } catch (e) {
+            appendMessage('system', `Error: ${e.message}`);
         }
     }
 
-    async function sendQuickReply(text) {
-        if (chatInput.disabled) return;
-        chatInput.value = text;
-        await submitMessage(text);
+    function updateDedupeStats() {
+        statAlerts.innerText = totalAlerts;
+        statIncidents.innerText = totalIncidents;
+        const ratio = totalAlerts > 0 ? Math.round((totalIncidents / totalAlerts) * 100) : 100;
+        statRatio.innerText = `${ratio}%`;
     }
 
     async function handleChatSubmit(e) {
         e.preventDefault();
         const text = chatInput.value.trim();
         if (!text) return;
-        await submitMessage(text);
+        chatInput.value = '';
+        await sendTurn(text);
     }
 
-    async function submitMessage(text) {
-        chatInput.value = '';
+    async function sendQuickReply(text) {
+        if (chatInput.disabled) {
+            appendMessage('system', 'Trigger a fault first before speaking.');
+            return;
+        }
+        await sendTurn(text);
+    }
+
+    async function sendTurn(text) {
         appendMessage('user', text);
         chatInput.disabled = true;
         chatSubmit.disabled = true;
 
         try {
-            const res = await fetch('/api/chat', {
+            const resp = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: text })
             });
-            const data = await res.json();
-            
-            if (!res.ok) throw new Error(data.detail || 'Chat error');
+            const data = await resp.json();
 
-            appendMessage('agent', data.response);
-            updateLatency(data.latency_ms);
-            
-            if (data.approved === true && data.dispatch_event) {
-                const banner = document.createElement('div');
-                banner.className = 'bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4';
-                banner.innerHTML = `
-                    <strong class="font-bold">Action Approved & Dispatched</strong>
-                    <span class="block sm:inline">${data.dispatch_event.audit}</span>
-                    <pre class="mt-2 text-xs bg-green-200 p-2 rounded text-green-900">${data.dispatch_event.command}</pre>
-                `;
-                chatFeed.appendChild(banner);
-                chatFeed.scrollTop = chatFeed.scrollHeight;
+            // Update Latency
+            latencyBadge.innerText = `${Math.round(data.latency_ms)}ms`;
+            if (data.latency_ms <= 800) {
+                latencyBadge.className = 'px-2.5 py-1 bg-green-100 text-green-800 rounded-full text-xs font-mono font-bold';
+            } else {
+                latencyBadge.className = 'px-2.5 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-mono font-bold';
             }
 
-        } catch (err) {
-            appendMessage('agent', `Error: ${err.message}`);
+            // Check approval status
+            if (data.approved === true) {
+                confirmationBadge.innerText = 'APPROVED & DISPATCHED';
+                confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-emerald-100 text-emerald-800 border border-emerald-400';
+                callStatusBadge.className = 'px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-semibold flex items-center gap-1.5';
+                callStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> RESOLVED';
+                if (activeFaultName) {
+                    renderFaultCardResolved(activeFaultName);
+                }
+                appendMessage('system', `🚨 Policy Authorization Confirmed: Emitted execute_action_signal to Temporal workflow.`);
+            }
+
+            appendMessage('agent', data.response);
+        } catch (e) {
+            appendMessage('system', `Turn failed: ${e.message}`);
         } finally {
             chatInput.disabled = false;
             chatSubmit.disabled = false;
             chatInput.focus();
         }
+    }
+
+    function appendMessage(role, text) {
+        const div = document.createElement('div');
+        div.className = `message ${role}`;
+        div.innerText = text;
+        chatFeed.appendChild(div);
+        chatFeed.scrollTop = chatFeed.scrollHeight;
     }
 </script>
 </body>

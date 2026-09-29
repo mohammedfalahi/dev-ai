@@ -2,8 +2,8 @@
 
 > Status: Live execution record  
 > Overall state: **IN PROGRESS**  
-> Active milestone: **Week 3 — Knowledge vault and hybrid retrieval** (Human Override: Deferring Week 0)  
-> Last updated: 2026-09-23
+> Active milestone: **Week 9 — Spoken approval, dispatch, and recovery watch**  
+> Last updated: 2026-09-27
 
 ## 1. How to maintain this file
 
@@ -32,8 +32,8 @@ Allowed states: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `DEFERR
 | 4 | Grounding validator and action policy | PASS | Zero unsupported commands and false approvals | tests/test_policy_and_grounding.py |
 | 5 | Durable incident orchestration | PASS | Worker kill/replay without lost or duplicate lifecycle | tests/test_orchestrator.py |
 | 6 | Offline conversational loop | PASS | Grounded p50 ≤800 ms; p95 <1 s in controlled test | tests/test_voice_agent.py |
-| 7 | SIP and controlled telephony | NOT STARTED | Allowlisted call; voicemail not acknowledged; kill switch passes | Pending |
-| 8 | Integrate Investigator and Voice | NOT STARTED | Caller understands grounded brief; latency gate holds | Pending |
+| 7 | SIP and controlled telephony | PASS | Allowlisted call; voicemail not acknowledged; kill switch passes | tests/test_telephony.py |
+| 8 | Integrate Investigator and Voice | PASS | Caller understands grounded brief; latency gate holds | tests/test_voice_agent.py |
 | 9 | Spoken approval, dispatch, and recovery watch | NOT STARTED | Complete signed record for every dispatch; no execution | Pending |
 | 10 | Escalation and night-survival hardening | NOT STARTED | Escalation survives failures within caps | Pending |
 | 11 | Evaluation, compliance, and pilot hardening | NOT STARTED | All release gates pass; pilot and rollback approved | Pending |
@@ -338,7 +338,7 @@ Use this format for later entries:
 - Risks: Automated CI runs require ephemeral pgvector container and Google GenAI API secrets in GitHub Actions.
 - Next: Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
 
-### 2026-09-27 — Fast-Brain Voice Loop with LiveKit Agents and Gemini Live (Milestone 23) Completed
+### 2026-09-27 — Fast-Brain Voice Loop with LiveKit Agents and Gemini Live (Milestone 24) Completed
 
 - State: PASS
 - Changes: `apps/voice/agent.py`, `tests/test_voice_agent.py`, `apps/orchestrator/workflow.py`, `packages/core/config.py`, `pyproject.toml`, `uv.lock`, `.context/architecture.md`, `.context/library-docs.md`, `.context/progress-tracker.md`
@@ -347,6 +347,69 @@ Use this format for later entries:
 - Risks: Realtime WebRTC audio requires live LiveKit server and Gemini Multimodal Live API quota in production PSTN/SIP deployments; offline simulation and unit test coverage validated locally.
 - Next: Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
 
+### 2026-09-27 — Controlled Telephony Adapter & Safety Guardrails (Week 7 / Milestone 25) Completed
+
+- State: PASS
+- Changes: `packages/contracts/telephony.py`, `packages/contracts/__init__.py`, `packages/core/config.py`, `packages/providers/__init__.py`, `packages/providers/telephony.py`, `apps/orchestrator/activities.py`, `tests/test_telephony.py`, `.context/progress-tracker.md`, `learning.md`
+- Verification: `uv run pytest tests/test_telephony.py -v` (5/5 passed), full suite `uv run pytest` (76/76 passed), `uv run ruff check packages/ apps/orchestrator/ tests/test_telephony.py` (all passed), `uv run mypy packages/providers/ packages/contracts/telephony.py tests/test_telephony.py` (all clean).
+- Metrics: Allowlisted call validation passes. Telephony kill switch blocks all dials immediately when engaged. E.164 normalization strictly enforced. LiveKit SIP adapter stubbed and guarded. Activity `notify_oncall_activity` successfully integrated with `TelephonyAdapter`.
+- Risks: Production outbound PSTN dialing will require LiveKit Cloud SIP trunk provisioning with Twilio credentials once live PSTN testing is explicitly authorized.
+- Next: Advance to Week 8 (Integrate Investigator and Voice).
+
+### 2026-09-27 — Resilient Primary-to-Fallback Voice Model Hierarchy (Milestone 26) Completed
+
+- State: PASS
+- Changes: `packages/core/config.py`, `apps/voice/agent.py`, `.env.example`, `tests/test_voice_agent.py`, `.context/architecture.md` (ADR-016), `.context/progress-tracker.md`, `learning.md`
+- Verification: `uv run pytest tests/test_voice_agent.py -v` (13/13 passed), full suite `uv run pytest` (79/79 passed), `uv run ruff check packages/core/config.py apps/voice/ tests/test_voice_agent.py` (clean), `uv run mypy packages/core/config.py apps/voice/agent.py tests/test_voice_agent.py` (clean).
+- Metrics: Primary Google AI Studio initialization (`gemini-3.8-live`, `vertexai=False`) with zero-downtime failover to Google Cloud Vertex AI (`gemini-live-2.5-flash-native-audio`, `vertexai=True`, `project`, `location`) when `GEMINI_API_KEY` is missing or when initialization encounters rate-limits/exceptions.
+- Risks: Vertex AI requires valid Google Cloud project credentials (`gcloud auth application-default login` or service account key) for live deployment.
+- Next: Advance to Week 8 (Integrate Investigator and Voice).
+
+### 2026-09-27 — Integrate Investigator and Voice Orchestration (Week 8 / Milestone 27) Completed
+
+- State: PASS
+- Changes: `packages/contracts/ico.py`, `apps/voice/agent.py`, `apps/orchestrator/activities.py`, `tests/conftest.py`, `tests/test_voice_agent.py`, `tests/test_contracts.py`, `.context/architecture.md` (ADR-017), `.context/progress-tracker.md`, `learning.md`
+- Verification: `uv run pytest tests/test_voice_agent.py -v` (14/14 passed), `uv run pytest tests/test_orchestrator.py -v` (2/2 passed), `uv run pytest tests/test_contracts.py -v` (3/3 passed), `uv run ruff check .` (all clean), `uv run mypy packages/ apps/ evals/ tests/` (clean).
+- Metrics: Empathetic natural voice brief delivered on session connect ("Hello, sorry to wake you up..."). Conversational prompt engineering and flexible conversational assent engine ("yeah sure", "go ahead", "yes please", "do that", "confirm", "proceed") validated for tool calling with deterministic runbook AST grounding and policy tiering. Offline testing optimized with HuggingFace Hub offline protection (`tests/conftest.py`).
+- Risks: Production PSTN testing requires live LiveKit Cloud SIP trunk credentials; offline unit tests ensure hermetic verification.
+- Next: Advance to Week 9 (Spoken approval, dispatch, and recovery watch).
+
+### 2026-09-27 — 2-Page Developer Console & Evaluation Hub (Milestone 28) Completed
+
+- State: PASS
+- Changes: `apps/console/app.py`, `apps/console/static/index.html`, `apps/console/static/triage.html`, `tests/test_console.py`, `.context/progress-tracker.md`, `learning.md`
+- Verification: `uv run pytest tests/test_console.py -v` (6/6 passed in 4.3s), `uv run ruff check apps/console/ tests/test_console.py` (clean), `uv run mypy apps/console/ tests/test_console.py` (clean).
+- Metrics: Built 2-page dashboard: Dashboard 1 (`GET /`) provides operations & chaos control (broken-shop fault injection, service health badges, gateway dedupe metrics, LiveKit call state, policy gate verification). Dashboard 2 (`GET /triage`) provides ICO forensics (structured cards + raw JSON toggle) and visual 3-tier Evaluation Matrix scorecard (retrieval, reranking/refusal, generation/safety) with on-demand `[ Run Evaluation Matrix ]` trigger.
+- Risks: Real-time LiveKit audio streaming in browser requires running LiveKit server; offline simulated text mode operates hermetically.
+- Next: Advance to Week 9 (Spoken approval, dispatch, and recovery watch).
+
+### 2026-09-28 — Voice Assent Tool Execution, Real-Time Console State Transition & Fault Lifecycle Reset (Milestone 29) Completed
+
+- State: PASS
+- Changes: `apps/voice/agent.py`, `apps/console/app.py`, `apps/console/static/index.html`, `packages/core/config.py`, `tests/test_voice_agent.py`, `tests/test_console.py`, `learning.md`, `.context/progress-tracker.md`
+- Verification: `uv run pytest tests/test_voice_agent.py tests/test_console.py -v` (26/26 passed), `uv run pytest tests/ -v` (90/90 passed in full test suite), `uv run ruff check apps/voice/agent.py apps/console/app.py tests/test_voice_agent.py tests/test_console.py` (all clean).
+- Metrics: Voice agent verbal assent ("go ahead", "confirm", "do it", "yes", "proceed") directly invokes `execute_remediation_command` without re-prompting. Function tool returns structured JSON and dispatches async resolution notification to `/api/faults/resolve`. Console server transitions active fault to `RESOLVED` and provides `POST /api/faults/reset` (with optional `fault_id`). Console web dashboard auto-updates fault card to green `✅ Problem Solved` / `RESOLVED` via 1.5s background polling, and provides a `🔄 Reset State` button to cleanly revert the fault lifecycle.
+- Risks: Real LiveKit speech calls require LiveKit server connectivity; unit and integration test coverage verifies isolated HTTP and tool layers hermetically.
+- Next: Advance to Week 9 (Spoken approval, dispatch, and recovery watch).
+
+### 2026-09-28 — Optional PSTN Dialing, Twilio Adapter & Demo Mode Configuration (Milestone 30) Completed
+
+- State: PASS
+- Changes: `packages/contracts/telephony.py`, `packages/core/config.py`, `packages/providers/telephony.py`, `apps/orchestrator/activities.py`, `scripts/toggle_demo_mode.sh`, `.env.example`, `tests/test_telephony.py`, `learning.md`, `.context/progress-tracker.md`
+- Verification: `uv run pytest tests/test_telephony.py -v` (9/9 passed), full suite `uv run pytest` (94/94 passed), `uv run ruff check` (all clean).
+- Metrics: Multi-mode telephony configuration (`TELEPHONY_MODE` options: `"livekit-rtc"`, `"browser"`, `"fake"`, `"twilio"`, `"livekit-sip"`). Default set to `"livekit-rtc"`. In `notify_oncall_activity`, demo mode skips PSTN dials, returns `SKIPPED_PSTN_RTC_READY`, and logs LiveKit room details (`agents-playground.livekit.io`). `TwilioVoiceAdapter` enforces safety allowlist and checks credentials. Executable helper `scripts/toggle_demo_mode.sh` seamlessly switches between browser demo and PSTN dialing.
+- Risks: Real Twilio PSTN dialing requires verified allowlisted phone numbers and funded Twilio credentials; demo mode (`livekit-rtc`) bypasses carrier dependencies completely.
+- Next: Advance to Week 9 (Spoken approval, dispatch, and recovery watch).
+
+### 2026-09-29 — End-to-End PSTN Dialing Wiring & HTTPS TwiML Compatibility (Milestone 31) Completed
+
+- State: PASS
+- Changes: `packages/providers/telephony.py`, `packages/contracts/telephony.py`, `packages/core/config.py`, `apps/orchestrator/activities.py`, `apps/console/app.py`, `tests/test_telephony.py`, `learning.md`, `.context/progress-tracker.md`
+- Verification: `uv run pytest tests/test_telephony.py tests/test_console.py -v` (17/17 passed), `uv run pytest tests/test_voice_agent.py -v` (18/18 passed), `uv run ruff check` (all clean), live Twilio trial call dispatch verified (dispatched and queued with SID `CA02feb8ca3b9e0a9c1eb23c5b7329d410`).
+- Metrics: Resolved Twilio 301 redirect rejection by switching from insecure `http://` to `https://twimlets.com/echo?Twiml=...` with standard `voice="alice"` and `urllib.parse.quote_plus()`. Added `twilio_twiml_url` configuration override. Updated `notify_oncall_activity` to route to `settings.oncall_phone_number` and pass `initial_brief`. Wired `apps/console/app.py` `trigger_fault()` to invoke `notify_oncall_activity` so fault triggers initiate outbound phone calls when configured.
+- Risks: On Twilio trial accounts, destination numbers must be verified in the Twilio console and trial disclaimers precede the spoken message.
+- Next: Advance to Week 9 (Spoken approval, dispatch, and recovery watch).
+
 ## 11. Current next action
 
-Advance to Week 7 (SIP and controlled telephony) or Week 8 (Integrate Investigator and Voice).
+Advance to Week 9 (Spoken approval, dispatch, and recovery watch).

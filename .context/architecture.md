@@ -377,15 +377,17 @@ The voice architecture implements speech-to-speech interaction using LiveKit Age
 PSTN/SIP audio
   → LiveKit Room
   → LiveKit Agents Worker
-  → Gemini Live Realtime Model (`gemini-live-2.5-flash-native-audio` via `livekit-plugins-google`)
+  → Resilient Realtime Model Factory (`get_realtime_model`)
+      ↳ Primary: Gemini 3.8 Live (`gemini-3.8-live` via Google AI Studio, `vertexai=False`)
+      ↳ Fallback: Gemini 2.5 Flash Native Audio (`gemini-live-2.5-flash-native-audio` via Vertex AI, `vertexai=True`)
   → Injected system instruction containing pre-computed ICO & candidate runbooks
   → Native low-latency bidirectional audio stream
   → Deterministic Tool Calling (`execute_remediation_command`)
       ↳ GroundingValidator.validate_action (runbook chunk matching)
       ↳ Policy Engine (Tier 1 Read-only vs. Tier 2 Mutating)
-      ↳ Spoken Confirmation Handshake ('GO' / 'confirm')
+      ↳ Flexible Spoken Assent Handshake ('confirm', 'go ahead', 'yeah sure', 'proceed')
       ↳ Temporal Workflow Signal (`IncidentLifecycleWorkflow.execute_action_signal`)
-  → Spoken brief delivered from pre-computed ICO upon connection
+  → Empathetic spoken brief delivered from pre-computed ICO upon connection
   → LiveKit WebRTC / SIP audio to on-call engineer
 ```
 
@@ -393,7 +395,7 @@ Speech-to-speech operates with native audio input/output, but CANNOT bypass dete
 - Spoken facts must ground strictly in the pre-computed Incident Context Object (ICO).
 - Systems and details not present in the ICO are refused ("I don't have information on that.").
 - Remediations cannot be hallucinated: tool calling routes every candidate command through `GroundingValidator.validate_action` and `classify_command`.
-- Mutating actions (Tier 2) are strictly blocked without an explicit confirmation keyword (`GO` or `confirm`) before signaling Temporal.
+- Mutating actions (Tier 2) require affirmative spoken conversational assent ('confirm', 'go ahead', 'yeah sure', 'proceed') before signaling Temporal, while negative or ambiguous utterances fail closed.
 
 ### Latency budget
 
@@ -708,6 +710,8 @@ Create a full ADR when changing any item below. Current decisions:
 | ADR-009 | Provider SDKs stay behind internal ports | Accepted |
 | ADR-010 | Responder deploys outside the monitored primary failure domain | Accepted |
 | ADR-015 | LiveKit Agents with Gemini Live Native Audio (Speech-to-Speech) | Accepted |
+| ADR-016 | Resilient Voice Model Hierarchy (Gemini 3.8 Live Primary → Vertex AI 2.5 Flash Fallback) | Accepted |
+| ADR-017 | Empathetic Voice Delivery and Flexible Spoken Assent | Accepted |
 
 ## 22. Architecture change checklist
 

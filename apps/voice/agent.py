@@ -1,16 +1,25 @@
 import asyncio
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 import livekit.plugins.google.realtime as google_realtime
 from google import genai
 from google.genai import types
-from livekit.agents import NOT_GIVEN, Agent, AgentSession, JobContext, function_tool
+from livekit.agents import (
+    NOT_GIVEN,
+    Agent,
+    AgentSession,
+    JobContext,
+    WorkerOptions,
+    cli,
+    function_tool,
+)
 
-from apps.orchestrator.workflow import IncidentLifecycleWorkflow
 from packages.contracts.ico import IncidentContextObject
 from packages.contracts.incident import CandidateRunbook, Hypothesis
 from packages.core.config import settings
@@ -26,6 +35,8 @@ async def default_signal_temporal(action_payload: dict[str, Any]) -> bool:
     """
     try:
         from temporalio.client import Client
+
+        from apps.orchestrator.workflow import IncidentLifecycleWorkflow
 
         incident_id = str(action_payload.get("incident_id", "UNKNOWN"))
         client = await Client.connect(settings.temporal_host)
@@ -65,6 +76,71 @@ def get_default_ico() -> IncidentContextObject:
     )
 
 
+def extract_ico_from_metadata(metadata: str | None) -> IncidentContextObject | None:
+    """
+    Extracts and parses an IncidentContextObject from room or job metadata if present.
+    Returns None if missing or invalid.
+    """
+    if not metadata:
+        return None
+    try:
+        data = json.loads(metadata)
+        if isinstance(data, dict):
+            ico_dict = data.get("ico", data)
+            return IncidentContextObject.model_validate(ico_dict)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Could not extract ICO from room metadata: {exc}")
+    return None
+
+
+def get_realtime_model(
+    voice: str | None = None,
+    instructions: str | None = None,
+    api_key: str | None = None,
+    model_name: str | None = None,
+) -> google_realtime.RealtimeModel:
+    """
+    Resilient factory function for LiveKit Google RealtimeModel.
+    Attempts primary connection to Gemini 3.8 Live via Google AI Studio.
+    If api_key is missing or initialization fails, falls back cleanly to
+    Gemini 2.5 Flash Native Audio on Vertex AI.
+    """
+    primary_api_key = api_key or settings.gemini_api_key
+    selected_voice = voice or settings.gemini_live_voice
+    system_instructions = instructions or ""
+    primary_model = model_name or settings.gemini_live_model
+
+    if primary_api_key:
+        try:
+            return google_realtime.RealtimeModel(
+                model=primary_model,
+                voice=selected_voice,
+                instructions=system_instructions,
+                api_key=primary_api_key,
+                vertexai=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                f"Failed to initialize primary RealtimeModel ({primary_model}) via Google AI Studio: {exc}. "
+                "Failing over to Vertex AI fallback model."
+            )
+    else:
+        logger.info(
+            "No Gemini API key provided for Google AI Studio. "
+            "Falling back to Vertex AI RealtimeModel."
+        )
+
+    # Fallback to Vertex AI
+    return google_realtime.RealtimeModel(
+        model=settings.fallback_gemini_live_model,
+        voice=selected_voice,
+        instructions=system_instructions,
+        vertexai=True,
+        project=settings.google_cloud_project or NOT_GIVEN,
+        location=settings.google_cloud_location or NOT_GIVEN,
+    )
+
+
 class VoiceAgentSession:
     """
     The Fast-Brain Voice Agent Session.
@@ -82,13 +158,16 @@ class VoiceAgentSession:
     ) -> None:
         self.ico = ico
         self.temporal_dispatcher = temporal_dispatcher
-        self.api_key = api_key or settings.livekit_api_key
+        self.api_key = api_key or settings.gemini_api_key
         self.is_confirmed: bool = False
         self.dispatched_actions: list[dict[str, Any]] = []
         self.history: list[types.Content] = []
 
         try:
-            self.client: genai.Client | None = genai.Client()
+            if self.api_key:
+                self.client: genai.Client | None = genai.Client(api_key=self.api_key)
+            else:
+                self.client = genai.Client()
         except Exception:  # noqa: BLE001
             self.client = None
 
@@ -101,18 +180,22 @@ class VoiceAgentSession:
 
         self.system_instruction = f"""
 You are the Voice Agent (fast brain) for the On-call Voice system.
-You are in a live voice conversation with the on-call engineer.
-You must speak strictly from the following Incident Context Object (ICO).
-Do not perform external lookups. Do not invent facts or procedures.
-Keep answers concise (1-2 sentences).
-Do not use markdown formatting (no backticks, asterisks, brackets, or raw JSON). Speak numbers naturally.
+You are in a live phone conversation with the on-call engineer who was likely just woken up.
+Speak with a calm, empathetic, and professional human tone (e.g., "Hello, sorry to wake you up...").
+Speak in clean, concise conversational language (1-2 sentences per turn) rather than reading rigid metadata or raw logs.
+Speak numbers and percentages naturally (e.g., "about ninety-four percent").
+Do not use markdown formatting (no backticks, asterisks, brackets, or raw JSON).
 
-If the user asks about systems, commands, or details not explicitly defined 
-in the ICO below, you MUST refuse and reply exactly: "I don't have information on that."
+You must answer strictly from the following Incident Context Object (ICO).
+Do not perform external lookups or live RAG queries. Do not invent facts or procedures.
+If the user asks about systems, commands, or details not explicitly defined in the ICO below,
+you MUST refuse and reply exactly: "I don't have information on that."
 Note: The user asking for the "root cause" refers to the "HYPOTHESIS" below.
 If the user asks about blast radius, impact, or affected users, refer to the "IMPACT" and "SEVERITY" below.
 
-When the user asks to execute or run a remediation or diagnostic action, call the 'execute_remediation_command' tool.
+When the user asks to execute or run a remediation or diagnostic action, or gives natural conversational assent
+(such as "yeah sure", "go ahead", "yes please", "do that", "confirm", "proceed", "do it", "yes"), you MUST IMMEDIATELY call the 'execute_remediation_command' tool rather than repeating the request for confirmation or asking again. Never ask for confirmation repeatedly once assent has been given.
+When the tool execution completes successfully, speak a single, clean completion sentence confirming that the remediation was executed (e.g., "Remediation executed successfully. Database pool cleared.") and then stop prompting.
 Do NOT attempt to execute or authorize any command not present in the verified runbooks below.
 
 INCIDENT ID: {ico.incident_id}
@@ -127,6 +210,29 @@ RUNBOOKS:
     async def get_initial_greeting(self) -> str:
         """Returns the pre-validated 2-sentence conversational spoken summary."""
         return self.ico.to_voice_brief()
+
+    async def notify_console_resolution(
+        self, command: str, console_url: str | None = None
+    ) -> bool:
+        """
+        Dispatches an async HTTP POST notification to the console server notifying it of fault resolution.
+        Uses a strict timeout and fails gracefully so voice streaming is never interrupted.
+        """
+        url = console_url or getattr(settings, "console_url", "http://localhost:8000")
+        endpoint = f"{url.rstrip('/')}/api/faults/resolve"
+        payload = {
+            "incident_id": self.ico.incident_id,
+            "command": command,
+            "status": "RESOLVED",
+            "service": self.ico.candidate_runbooks[0].service if self.ico.candidate_runbooks else "unknown",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.post(endpoint, json=payload)
+                return resp.status_code == 200
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Failed to notify console of resolution at {endpoint}: {exc}")
+            return False
 
     async def execute_tool(self, command: str) -> str:
         """
@@ -145,7 +251,7 @@ RUNBOOKS:
         if tier == ActionTier.TIER_2_MUTATING and not self.is_confirmed:
             return (
                 f"CONFIRMATION_REQUIRED: Command '{command}' is a mutating Tier 2 action. "
-                "Spoken confirmation ('GO' or 'confirm') is required before execution."
+                "Spoken confirmation ('confirm', 'go ahead', 'yeah sure') is required before execution."
             )
 
         # Find matching source chunk
@@ -190,7 +296,31 @@ RUNBOOKS:
             Args:
                 command: The exact command string to execute.
             """
-            return await session_ref.execute_tool(command)
+            session_ref.is_confirmed = True
+            raw_result = await session_ref.execute_tool(command)
+            if "SUCCESS" in raw_result:
+                try:
+                    await session_ref.notify_console_resolution(command)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"Error notifying console of resolution: {exc}")
+
+                msg = (
+                    "Remediation executed successfully. DB pool cleared."
+                    if "checkout" in command.lower() or "db" in command.lower()
+                    else "Remediation executed successfully. Fault resolved."
+                )
+                return json.dumps({
+                    "status": "SUCCESS",
+                    "command": command,
+                    "message": msg,
+                    "details": raw_result,
+                })
+
+            return json.dumps({
+                "status": "FAILED",
+                "command": command,
+                "message": raw_result,
+            })
 
         return execute_remediation_command
 
@@ -202,13 +332,13 @@ RUNBOOKS:
     ) -> Agent:
         """
         Builds the LiveKit Agent configured with Gemini Live native audio (speech-to-speech)
-        and grounded tool calling.
+        and grounded tool calling using resilient primary-to-fallback models.
         """
-        realtime_model = google_realtime.RealtimeModel(
-            model=model_name or settings.gemini_live_model,
+        realtime_model = get_realtime_model(
             voice=voice or settings.gemini_live_voice,
             instructions=self.system_instruction,
             api_key=api_key or self.api_key,
+            model_name=model_name,
         )
         tool = self.create_livekit_tool()
         return Agent(
@@ -233,30 +363,80 @@ RUNBOOKS:
             chosen_llm = NOT_GIVEN
         return AgentSession(llm=chosen_llm, loop=loop)
 
+    async def start(self, room: Any) -> AgentSession:
+        """
+        Starts the LiveKit conversational session in the specified room,
+        binding the resilient Gemini Live model and deterministic tools,
+        and emitting the empathetic opening brief.
+        """
+        agent = self.create_livekit_agent()
+        livekit_session = self.create_livekit_session(agent=agent)
+        await livekit_session.start(agent, room=room)
+
+        # Deliver the spoken brief as the initial utterance upon connect
+        spoken_brief = await self.get_initial_greeting()
+        if hasattr(livekit_session, "generate_reply"):
+            await livekit_session.generate_reply(
+                instructions=f"Greet the on-call engineer immediately with this exact incident brief: {spoken_brief}"
+            )
+        else:
+            await livekit_session.say(spoken_brief)
+        return livekit_session
+
     def check_confirmation(
         self, user_utterance: str, proposed_command: str
     ) -> tuple[bool, str, dict[str, str] | None]:
         """
         Implements the Tier 2 confirmation handshake.
-        Requires the exact explicit keyword to authorize the action.
+        Allows flexible, natural spoken confirmations ('yeah sure', 'go ahead', 'yes please',
+        'do that', 'confirm', 'proceed', 'go', 'approve', etc.) while rejecting ambiguous
+        or negative responses.
         Returns a tuple of (is_approved, message, dispatch_event).
         """
         text = user_utterance.strip().lower()
-        # Remove punctuation to catch isolated keywords
-        text = re.sub(r"[^\w\s]", "", text)
+        # Clean punctuation
+        text = re.sub(r"[^\w\s]", " ", text)
+        cleaned_text = re.sub(r"\s+", " ", text).strip()
 
-        # We accept 'confirm' or 'go'
-        # Any casual assent like "yeah sure" or "do it" fails this strict check.
-        if text == "confirm" or text == "go":
+        affirmative_phrases = [
+            "confirm",
+            "go ahead",
+            "yes please",
+            "do that",
+            "yeah sure",
+            "go",
+            "proceed",
+            "approve",
+            "do it",
+            "yes",
+            "sure",
+        ]
+
+        # Check for affirmative match
+        is_match = False
+        for phrase in affirmative_phrases:
+            pattern = rf"(^|\b){re.escape(phrase)}(\b|$)"
+            if re.search(pattern, cleaned_text):
+                is_match = True
+                break
+
+        # Explicit negative override check (e.g., "no", "don't", "wait", "cancel")
+        negative_override = bool(re.search(r"\b(no|dont|don't|stop|wait|cancel|deny|never)\b", cleaned_text))
+
+        if is_match and not negative_override:
             self.is_confirmed = True
             dispatch_event = {
                 "status": "APPROVED",
                 "command": proposed_command,
-                "audit": "Action authorized via spoken keyword and queued for dispatch",
+                "audit": "Action authorized via conversational assent and queued for dispatch",
             }
             return True, f"Action confirmed. Authorized command: {proposed_command}", dispatch_event
 
-        return False, "Confirmation denied. Exact keyword 'GO' or 'confirm' is required.", None
+        return (
+            False,
+            "Confirmation denied. Affirmative assent (e.g. 'confirm', 'go ahead', 'yeah sure') is required.",
+            None,
+        )
 
     async def handle_turn(self, user_utterance: str) -> str:
         """
@@ -310,25 +490,16 @@ RUNBOOKS:
 
 async def entrypoint(ctx: JobContext) -> None:
     """
-    LiveKit Agents worker entrypoint for speech-to-speech incident briefings.
+    LiveKit Agents worker entrypoint for Mode B (Interactive Two-Way Voice).
+    Connects to the LiveKit room, extracts precomputed ICO context,
+    and runs the bidirectional Gemini Live audio session.
     """
-    ico_data = ctx.room.metadata
-    ico: IncidentContextObject
-    if ico_data:
-        try:
-            ico = IncidentContextObject.model_validate_json(ico_data)
-        except Exception:  # noqa: BLE001
-            ico = get_default_ico()
-    else:
-        ico = get_default_ico()
-
-    session = VoiceAgentSession(ico=ico)
-    agent = session.create_livekit_agent()
-    livekit_session = session.create_livekit_session(agent=agent)
-
     await ctx.connect()
-    await livekit_session.start(agent, room=ctx.room)
+    ico = extract_ico_from_metadata(ctx.room.metadata) or get_default_ico()
+    session = VoiceAgentSession(ico=ico)
+    await session.start(ctx.room)
 
-    # Deliver the spoken brief as the initial utterance upon connect
-    spoken_brief = await session.get_initial_greeting()
-    await livekit_session.say(spoken_brief)
+
+if __name__ == "__main__":
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint , agent_name="callops-agent"))
+

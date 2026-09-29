@@ -97,8 +97,9 @@ def test_ico_to_voice_brief():
 
     # Should end cleanly and read like prose
     expected = (
-        "We are tracking a SEV1 incident: checkout-api returning 500s. "
-        "About 94% of requests failing. "
-        "The leading hypothesis is redis cache memory is exhausted."
+        "Hello, sorry to wake you up. We are tracking a SEV1 incident: checkout-api returning 500s. "
+        "Specifically, About 94% of requests failing. "
+        "The leading hypothesis is redis cache memory is exhausted. "
+        "Would you like me to run the recommended remediation?"
     )
     assert brief == expected
