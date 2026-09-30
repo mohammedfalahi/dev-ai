@@ -19,3 +19,9 @@ Thumbs.db
 eval-report.json
 
 
+# Brag skill and generated output
+.agents/skills/brag/
+.claude/skills/brag
+.trae/skills/brag
+skills/brag
+brag-output/
