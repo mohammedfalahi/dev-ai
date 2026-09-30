@@ -1426,6 +1426,80 @@
   - **Silent Fault Injection**: Prevents the console from simulating faults without notifying the on-call engineer.
   - **Calling Convention TypeErrors**: Resolves discrepancies between contract objects and keyword arguments across adapters.
 
+## [2026-09-30] Milestone 32: Hybrid Action Policy & Telegram Escalation Handover
+
+### 1. What was built & which files were modified
+- **Hybrid Action Policy Architecture**:
+  - Implemented a two-tier policy split: Tier 1 (Read-Only Diagnostics) are permitted for automatic execution on the server, while Tier 2 (Mutating Remediations) block server-side auto-execution, dispatch complete incident diagnostics + verbatim command code fences + manual instructions to Telegram, and hand over remediation ownership to the human operator under `PROBLEM_ESCALATED_TO_HUMAN`.
+- **Telegram Dispatcher & Formatting Module (`packages/core/telegram.py`)**:
+  - Built `dispatch_telegram_escalation(...)`, `format_telegram_escalation_message(...)`, and `extract_manual_steps_from_runbook(...)`.
+  - Enforces Markdown formatting with status `PROBLEM_ESCALATED_TO_HUMAN`, bash command fence, and ordered step instructions.
+  - Implemented graceful offline fallback (`DISPATCHED_MOCK`) with zero external network overhead when credentials are unset.
+- **Settings & Environment Configuration (`packages/core/config.py`, `.env.example`)**:
+  - Added `telegram_bot_token: str = ""` and `telegram_chat_id: str = ""` with uppercase properties `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
+- **Deterministic Policy Helpers (`packages/policy/tier.py`)**:
+  - Added `is_auto_executable(command: str) -> bool` and `requires_human_escalation(command: str) -> bool`.
+- **Voice Agent Session Refactoring (`apps/voice/agent.py`)**:
+  - Updated prompt and `execute_remediation_command` tool: conversational verbal assent ("confirm", "go ahead", "yes please", etc.) on Tier 2 actions triggers Telegram escalation instead of executing mutations on the server.
+  - Speaks natural confirmation: *"Understood. I have dispatched the exact command and manual remediation steps to your Telegram. Escalating this incident to you now."*
+  - Notifies console via `notify_console_escalation()` and signals Temporal with `PROBLEM_ESCALATED_TO_HUMAN`.
+- **Temporal Workflow Orchestration (`apps/orchestrator/workflow.py`)**:
+  - Added `@workflow.signal async def escalate_incident_signal(self, payload: dict[str, Any])`.
+  - Appends an immutable audit record (`audit_type: "TELEGRAM_ESCALATION_HANDOVER"`) with timestamp, human utterance, command, and Telegram delivery details.
+  - Transitions workflow state to `PROBLEM_ESCALATED_TO_HUMAN`.
+- **Operations Console & Dashboard (`apps/console/app.py`, `apps/console/static/index.html`)**:
+  - Added `POST /api/faults/escalate` endpoint and updated `drill_status` and `chat_endpoint`.
+  - Updated frontend with amber/orange badges and fault state cards (`renderFaultCardEscalated`) for `PROBLEM_ESCALATED_TO_HUMAN`.
+- **System Specifications & Tests**:
+  - Updated `.context/architecture.md`, `AGENTS.md`, and `.context/progress-tracker.md`.
+  - Created `tests/test_telegram.py` and updated `tests/test_voice_agent.py`, `tests/test_console.py`, `tests/test_orchestrator.py`, and `tests/test_policy_and_grounding.py`.
+- Files modified:
+  - `packages/core/config.py` (Modified)
+  - `packages/core/telegram.py` (Created)
+  - `packages/policy/tier.py` (Modified)
+  - `packages/contracts/telephony.py` (Modified)
+  - `apps/voice/agent.py` (Modified)
+  - `apps/orchestrator/workflow.py` (Modified)
+  - `apps/console/app.py` (Modified)
+  - `apps/console/static/index.html` (Modified)
+  - `.env.example` (Modified)
+  - `.context/architecture.md` (Modified)
+  - `AGENTS.md` (Modified)
+  - `.context/progress-tracker.md` (Modified)
+  - `tests/test_telegram.py` (Created)
+  - `tests/test_voice_agent.py` (Modified)
+  - `tests/test_console.py` (Modified)
+  - `tests/test_orchestrator.py` (Modified)
+  - `tests/test_policy_and_grounding.py` (Modified)
+  - `learning.md` (Modified)
+
+### 2. The Core Concept & Math/Logic behind it (Plain English)
+- **The Hybrid Action Policy & Zero-Mutation Safeguard**:
+  - In safety-critical production systems, giving an AI agent direct, autonomous shell or cloud API access to execute mutating commands (`kubectl rollout restart`, `ALTER SYSTEM`, `DROP TABLE`, `kill`, `scale`) creates a massive blast-radius risk. Even with spoken confirmation over a phone call, ambient audio noise, homophones, or transient hallucinations could trigger unintended production restarts.
+  - The **Hybrid Action Policy** splits operations cleanly by risk tier:
+    1. **Tier 1 (Read-Only Diagnostics)**: Safe diagnostic commands (such as inspecting pods, checking connection pool metrics, or verifying error rates) produce zero state mutation and are permitted for automatic execution.
+    2. **Tier 2 (Mutating Remediations)**: State-altering commands trigger the **Zero-Mutation Safeguard**. When the on-call engineer gives affirmative verbal assent on the call, the system acknowledges the assent, blocks autonomous server execution, and invokes the Telegram escalation pipeline. It extracts the exact verbatim command fence and step-by-step instructions from the retrieved runbook and delivers them directly into the operator's private or team Telegram channel.
+  - This preserves the speed and cognitive offloading of automated triage and hypothesis formulation while guaranteeing that mutating execution in production remains strictly human-in-the-loop.
+- **Telegram Async Webhook Handshake**:
+  - The Telegram Bot API operates over HTTPS `POST https://api.telegram.org/bot<token>/sendMessage` with Markdown formatted payloads.
+  - The integration runs asynchronously via `httpx.AsyncClient(timeout=5.0)`. In disconnected environments or CI without active bot tokens, CallOps performs a graceful mock dispatch (`status: "DISPATCHED_MOCK"`), preserving deterministic verification and preventing hanging voice agent calls.
+
+### 3. Interview Defense
+- **Probable Interview Questions**:
+  1. *Why block Tier 2 automated execution even after verbal approval in production?*
+     - **Answer**: Spoken approval over voice channels is susceptible to acoustic distortion, wake-up confusion (the engineer may have been woken up seconds earlier), or background ambient noise matching affirmative phrases. Even more critically, executing a stateful mutation (such as a database restart or deployment rollback) requires cluster permissions and secret keys that should never be colocated on an internet-facing voice bot service. By delivering the exact verified runbook command and step-by-step manual procedure directly to the engineer's authenticated chat channel (Telegram), we enforce two-factor operational safety: the voice agent assists with triage and hypothesis formulation, but the human operator retains final physical execution authority in production.
+  2. *How does the system prevent dropped escalations if the Telegram API fails or is unreachable?*
+     - **Answer**: The escalation handover is backed by Temporal durable execution. When an escalation is triggered, the event is emitted to the durable `IncidentLifecycleWorkflow` via `escalate_incident_signal`, which persists an immutable audit log record and transitions the durable state to `PROBLEM_ESCALATED_TO_HUMAN`. If the Telegram API call times out or encounters network partitions, the error is recorded in the activity payload, the console UI alerts operators with an amber escalation tag, and the workflow escalation timer ensures fallback notification channels (such as secondary paging or SMS) are engaged.
+- **Architecture Choice (Why Hybrid Policy over Pure Auto-Execution or Pure Manual Notification?)**:
+  - **Pure Auto-Execution**: High operational risk. A single misclassified prompt or false-positive assent could trigger unintended cascading cluster restarts.
+  - **Pure Manual Notification**: High cognitive burden. The sleepy engineer has to search for runbooks, find log queries, and formulate commands manually.
+  - **Hybrid Policy (Our Choice)**: The optimal sweet spot. The system automates 100% of the cognitive heavy lifting (triage, evidence gathering, runbook retrieval, verbatim command extraction, diagnostic checks), while blocking autonomous mutation and providing the human with copy-pasteable commands and structured guidance.
+- **Failure Modes Prevented**:
+  - **Automated Cascade Failures**: Prevents voice bots from executing untested or dangerous mutations autonomously.
+  - **Hallucinated Production Mutating Commands**: Ensures every dispatched command matches a verified runbook code fence verbatim.
+  - **Unaudited Voice Executions**: Every verbal confirmation and Telegram dispatch is immutably recorded in the durable workflow event store with timestamp, human utterance, and source chunk identifier.
+
+
 
 
 

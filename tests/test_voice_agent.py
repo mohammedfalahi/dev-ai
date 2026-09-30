@@ -111,16 +111,24 @@ def test_approval_keyword_handshake(mock_ico):
         assert dispatch is None
         assert not session.is_confirmed
     
-    # Conversational assent phrases succeed
+    # Conversational assent phrases succeed and route to human escalation under Hybrid Policy
     for assent in ["yeah sure", "go ahead", "yes please", "do that", "confirm", "GO!", "proceed"]:
         session.is_confirmed = False
         is_approved, msg, dispatch = session.check_confirmation(assent, command)
         assert is_approved
         assert "confirmed" in msg.lower()
         assert dispatch is not None
-        assert dispatch["status"] == "APPROVED"
+        assert dispatch["status"] == "PROBLEM_ESCALATED_TO_HUMAN"
         assert dispatch["command"] == command
         assert session.is_confirmed
+        assert session.status == "PROBLEM_ESCALATED_TO_HUMAN"
+
+    # Tier 1 read-only command approval returns APPROVED status
+    session.is_confirmed = False
+    is_app, msg, dispatch = session.check_confirmation("confirm", "kubectl get pods -l app=checkout-api")
+    assert is_app
+    assert dispatch is not None
+    assert dispatch["status"] == "APPROVED"
 
 
 @pytest.mark.asyncio
@@ -165,7 +173,7 @@ async def test_tool_blocks_mutating_tier_2_without_confirmation(mock_ico):
 
 @pytest.mark.asyncio
 async def test_tool_executes_mutating_tier_2_after_confirmation(mock_ico):
-    """Test 8: Mutating Tier 2 command executes and signals Temporal after exact confirmation."""
+    """Test 8: Mutating Tier 2 command blocks server auto-execution, dispatches to Telegram, and transitions to PROBLEM_ESCALATED_TO_HUMAN."""
     dispatched: list[dict[str, Any]] = []
 
     async def mock_dispatcher(payload: dict[str, Any]) -> bool:
@@ -182,14 +190,17 @@ async def test_tool_executes_mutating_tier_2_after_confirmation(mock_ico):
     # 2. Execute tool
     result = await session.execute_tool(mutating_cmd)
 
-    assert "SUCCESS" in result
+    assert "ESCALATED" in result
     assert "TIER_2_MUTATING" in result
-    assert "dispatched to Temporal" in result
+    assert "PROBLEM_ESCALATED_TO_HUMAN" in result
     assert len(dispatched) == 1
     assert dispatched[0]["command"] == mutating_cmd
     assert dispatched[0]["tier"] == ActionTier.TIER_2_MUTATING.value
+    assert dispatched[0]["status"] == "PROBLEM_ESCALATED_TO_HUMAN"
     assert dispatched[0]["incident_id"] == "INC-001"
     assert dispatched[0]["source_chunk"] == "RB-1#chunk-1"
+    assert dispatched[0]["telegram"] is not None
+    assert session.status == "PROBLEM_ESCALATED_TO_HUMAN"
 
 
 @pytest.mark.asyncio
@@ -271,7 +282,7 @@ def test_get_realtime_model_fallback_on_exception(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.asyncio
 async def test_conversational_assent_authorizes_mutating_action(mock_ico):
-    """Test 14: Conversational assent ('yeah sure, go ahead') authorizes mutating Tier 2 tool execution."""
+    """Test 14: Conversational assent ('yeah sure, go ahead') authorizes mutating Tier 2 Telegram escalation."""
     dispatched: list[dict[str, Any]] = []
 
     async def mock_dispatcher(payload: dict[str, Any]) -> bool:
@@ -286,16 +297,18 @@ async def test_conversational_assent_authorizes_mutating_action(mock_ico):
     assert is_approved
     assert "confirmed" in msg.lower()
     assert dispatch_event is not None
+    assert dispatch_event["status"] == "PROBLEM_ESCALATED_TO_HUMAN"
     assert session.is_confirmed
 
-    # Now tool execution proceeds and dispatches to Temporal
+    # Tool execution proceeds, blocks auto-execution, and dispatches to Telegram / Temporal
     result = await session.execute_tool(mutating_cmd)
-    assert "SUCCESS" in result
+    assert "ESCALATED" in result
     assert "TIER_2_MUTATING" in result
-    assert "dispatched to Temporal" in result
+    assert "PROBLEM_ESCALATED_TO_HUMAN" in result
     assert len(dispatched) == 1
     assert dispatched[0]["command"] == mutating_cmd
     assert dispatched[0]["tier"] == ActionTier.TIER_2_MUTATING.value
+    assert dispatched[0]["status"] == "PROBLEM_ESCALATED_TO_HUMAN"
 
 
 def test_extract_ico_from_metadata(mock_ico):
@@ -344,20 +357,29 @@ async def test_voice_agent_session_start(mock_ico):
 
 @pytest.mark.asyncio
 async def test_livekit_tool_execution_sets_confirmed_and_returns_json(mock_ico):
-    """Test 17: Verify execute_remediation_command sets is_confirmed, notifies console, and returns JSON."""
+    """Test 17: Verify execute_remediation_command sets is_confirmed, notifies console escalation for Tier 2, and returns JSON."""
     session = VoiceAgentSession(mock_ico)
     assert not session.is_confirmed
 
     tool = session.create_livekit_tool()
-    with patch.object(session, "notify_console_resolution", new_callable=AsyncMock) as mock_notify:
+    with patch.object(session, "notify_console_escalation", new_callable=AsyncMock) as mock_notify:
         mock_notify.return_value = True
         result = await tool("kubectl rollout restart deploy/checkout-api")
 
         assert session.is_confirmed is True
         mock_notify.assert_awaited_once_with("kubectl rollout restart deploy/checkout-api")
         data = json.loads(result)
-        assert data["status"] == "SUCCESS"
-        assert "Remediation executed successfully" in data["message"]
+        assert data["status"] == "PROBLEM_ESCALATED_TO_HUMAN"
+        assert "dispatched the exact command and manual remediation steps to your Telegram" in data["message"]
+
+    # Verify Tier 1 read-only command executes and notifies console of resolution
+    with patch.object(session, "notify_console_resolution", new_callable=AsyncMock) as mock_res:
+        mock_res.return_value = True
+        result_ro = await tool("kubectl get pods -l app=checkout-api")
+        mock_res.assert_awaited_once_with("kubectl get pods -l app=checkout-api")
+        data_ro = json.loads(result_ro)
+        assert data_ro["status"] == "SUCCESS"
+        assert "Diagnostic command executed successfully" in data_ro["message"]
 
 
 def test_system_instruction_verbal_assent_directives(mock_ico):

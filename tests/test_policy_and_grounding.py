@@ -1,7 +1,13 @@
 from packages.contracts.ico import IncidentContextObject
 from packages.contracts.incident import CandidateRunbook, Hypothesis
 from packages.policy.grounding_validator import GroundingValidator
-from packages.policy.tier import ActionTier, classify_command
+from packages.policy.tier import (
+    ActionTier,
+    classify_action_tier,
+    classify_command,
+    is_auto_executable,
+    requires_human_escalation,
+)
 
 
 def test_command_tier_classification():
@@ -11,6 +17,19 @@ def test_command_tier_classification():
     assert classify_command("kubectl rollout restart deploy/checkout-api") == ActionTier.TIER_2_MUTATING
     assert classify_command("rm -rf /var/lib/data") == ActionTier.TIER_2_MUTATING
     assert classify_command("DROP TABLE users") == ActionTier.TIER_2_MUTATING
+
+
+def test_hybrid_policy_helpers():
+    """Test 1b: Verify is_auto_executable and requires_human_escalation."""
+    # Tier 1 read-only commands auto-execute
+    assert is_auto_executable("kubectl get pods -n production") is True
+    assert requires_human_escalation("kubectl get pods -n production") is False
+    assert classify_action_tier("kubectl get pods -n production") == 1
+
+    # Tier 2 mutating commands require human escalation
+    assert is_auto_executable("kubectl rollout restart deployment/cart") is False
+    assert requires_human_escalation("kubectl rollout restart deployment/cart") is True
+    assert classify_action_tier("kubectl rollout restart deployment/cart") == 2
 
 
 def test_grounding_rejection():

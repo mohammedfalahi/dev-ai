@@ -53,7 +53,7 @@ The diagram represents logical boundaries. Provider choices are adapters, not do
 | Orchestration | Durable incident lifecycle, timers, retries, escalation, cancellation | Non-deterministic network side effects inside workflows |
 | Investigator | Evidence collection, retrieval, hypothesis, Incident Context Object | Calling, approval, mutation |
 | Voice | Streaming conversation, turn handling, concise grounded speech | Heavy investigation or policy classification |
-| Action and approval | Tiering, canonical command, consent FSM, signed record, dispatch | Free-form model authorization |
+| Action and approval | Tiering (Hybrid Action Policy: Tier 1 auto-executes diagnostics, Tier 2 blocks server mutation and dispatches to Telegram), canonical command, consent FSM, signed record, dispatch | Free-form model authorization |
 | Memory and learning | Timeline, evaluation artifacts, postmortem draft, gap detection | Silently promoting model output into verified runbooks |
 
 ## 4. Repository topology
@@ -449,6 +449,21 @@ Rules:
 - Caller identity confidence and authorization are policy inputs.
 - If the call drops before the audit record is committed, approval is invalid.
 - MVP terminates at dispatch; there is no mutation executor.
+
+### Hybrid Action Policy & Telegram Escalation Handover
+
+The system enforces a strict two-tier execution split:
+1. **Tier 1 (Read-Only Diagnostics)**:
+   - Diagnostic commands (`kubectl get pods`, `kubectl describe`, `SELECT ...`, `curl -I`) are classified as safe.
+   - Permitted for automatic background execution and diagnostic evaluation.
+2. **Tier 2 (Mutating Remediations)**:
+   - State-altering operations (`kubectl rollout restart`, `ALTER SYSTEM`, `FLUSHDB`, `kill`, `scale`) trigger zero-mutation safeguards.
+   - Even when conversational verbal assent is confirmed, server-side auto-execution is strictly blocked.
+   - The voice agent invokes `dispatch_telegram_escalation` (`packages/core/telegram.py`), posting a structured Markdown message to Telegram (`https://api.telegram.org/bot<token>/sendMessage`) with incident ID, problem hypothesis, impact, verbatim code fence command, and step-by-step manual instructions.
+   - The spoken dialogue informs the operator: *"Understood. I have dispatched the exact command and manual remediation steps to your Telegram. Escalating this incident to you now."*
+   - The incident lifecycle state machine transitions: `INVESTIGATING` -> `AWAITING_ACK` -> `PROBLEM_ESCALATED_TO_HUMAN`.
+   - The Temporal workflow (`IncidentLifecycleWorkflow`) records an immutable audit trail entry (`audit_type: "TELEGRAM_ESCALATION_HANDOVER"`) and updates state to `PROBLEM_ESCALATED_TO_HUMAN`.
+   - The Console UI renders an amber badge representing `PROBLEM_ESCALATED_TO_HUMAN`.
 
 ## 14. Policy engine
 

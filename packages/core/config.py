@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     temporal_host: str = "localhost:7233"
     console_url: str = "http://localhost:8000"
 
+    # Telegram Escalation Configuration
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
+    @property
+    def TELEGRAM_BOT_TOKEN(self) -> str:
+        return self.telegram_bot_token
+
+    @property
+    def TELEGRAM_CHAT_ID(self) -> str:
+        return self.telegram_chat_id
+
     # Observability & Langfuse Configuration
     langfuse_public_key: str | None = None
     langfuse_secret_key: str | None = None

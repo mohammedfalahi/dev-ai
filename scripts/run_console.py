@@ -16,7 +16,7 @@ def main():
     # Give broken shop a second to start
     time.sleep(1)
 
-    print("Starting apps/console on port 8080...")
+    print("Starting apps/console on port 8000...")
     console_proc = subprocess.Popen(
         [
             sys.executable,
@@ -24,7 +24,7 @@ def main():
             "uvicorn",
             "apps.console.app:app",
             "--port",
-            "8080",
+            "8000",
             "--reload",
         ],
         cwd=root_dir,

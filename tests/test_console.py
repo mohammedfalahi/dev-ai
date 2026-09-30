@@ -201,6 +201,27 @@ def test_fault_resolve_and_status_endpoints():
     assert status_data["fault_states"]["db-pool-exhaustion"] == "RESOLVED"
 
 
+def test_fault_escalate_and_status_endpoints():
+    """Verify POST /api/faults/escalate transitions fault state to PROBLEM_ESCALATED_TO_HUMAN and status reflects it."""
+    # Reset first
+    client.post("/api/faults/reset")
+
+    # Escalate active fault
+    resp = client.post("/api/faults/escalate", json={"fault_id": "db-pool-exhaustion"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "PROBLEM_ESCALATED_TO_HUMAN"
+    assert data["fault_id"] == "db-pool-exhaustion"
+    assert data["fault_states"]["db-pool-exhaustion"] == "PROBLEM_ESCALATED_TO_HUMAN"
+
+    # Status check
+    status_resp = client.get("/api/faults/status")
+    assert status_resp.status_code == 200
+    status_data = status_resp.json()
+    assert status_data["active_fault_status"] == "PROBLEM_ESCALATED_TO_HUMAN"
+    assert status_data["fault_states"]["db-pool-exhaustion"] == "PROBLEM_ESCALATED_TO_HUMAN"
+
+
 def test_fault_reset_with_fault_id():
     """Verify POST /api/faults/reset with fault_id payload resets target fault state to IDLE."""
     # Mark resolved first
@@ -212,3 +233,15 @@ def test_fault_reset_with_fault_id():
     reset_data = reset_resp.json()
     assert reset_data["status"] == "RESET"
     assert reset_data["fault_states"]["db-pool-exhaustion"] == "IDLE"
+
+
+def test_streamlit_app_file_exists():
+    """Verify apps/console/streamlit_app.py exists and defines FASTAPI_BASE_URL."""
+    from pathlib import Path
+    app_file = Path("apps/console/streamlit_app.py")
+    assert app_file.exists()
+    content = app_file.read_text(encoding="utf-8")
+    assert "FASTAPI_BASE_URL" in content
+    assert "Operations & Chaos Cockpit" in content
+    assert "Triage Forensics & Evaluation Hub" in content
+

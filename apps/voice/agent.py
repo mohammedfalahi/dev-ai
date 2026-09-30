@@ -23,6 +23,10 @@ from livekit.agents import (
 from packages.contracts.ico import IncidentContextObject
 from packages.contracts.incident import CandidateRunbook, Hypothesis
 from packages.core.config import settings
+from packages.core.telegram import (
+    dispatch_telegram_escalation,
+    extract_manual_steps_from_runbook,
+)
 from packages.policy.grounding_validator import GroundingValidator
 from packages.policy.tier import ActionTier, classify_command
 
@@ -41,7 +45,10 @@ async def default_signal_temporal(action_payload: dict[str, Any]) -> bool:
         incident_id = str(action_payload.get("incident_id", "UNKNOWN"))
         client = await Client.connect(settings.temporal_host)
         handle = client.get_workflow_handle(f"incident-workflow-{incident_id}")
-        await handle.signal(IncidentLifecycleWorkflow.execute_action_signal, action_payload)
+        if action_payload.get("status") == "PROBLEM_ESCALATED_TO_HUMAN":
+            await handle.signal(IncidentLifecycleWorkflow.escalate_incident_signal, action_payload)
+        else:
+            await handle.signal(IncidentLifecycleWorkflow.execute_action_signal, action_payload)
         return True
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -160,6 +167,7 @@ class VoiceAgentSession:
         self.temporal_dispatcher = temporal_dispatcher
         self.api_key = api_key or settings.gemini_api_key
         self.is_confirmed: bool = False
+        self.status: str = "AWAITING_ACK"
         self.dispatched_actions: list[dict[str, Any]] = []
         self.history: list[types.Content] = []
 
@@ -195,7 +203,9 @@ If the user asks about blast radius, impact, or affected users, refer to the "IM
 
 When the user asks to execute or run a remediation or diagnostic action, or gives natural conversational assent
 (such as "yeah sure", "go ahead", "yes please", "do that", "confirm", "proceed", "do it", "yes"), you MUST IMMEDIATELY call the 'execute_remediation_command' tool rather than repeating the request for confirmation or asking again. Never ask for confirmation repeatedly once assent has been given.
-When the tool execution completes successfully, speak a single, clean completion sentence confirming that the remediation was executed (e.g., "Remediation executed successfully. Database pool cleared.") and then stop prompting.
+When the tool returns with status "PROBLEM_ESCALATED_TO_HUMAN", you MUST speak this exact sentence:
+"Understood. I have dispatched the exact command and manual remediation steps to your Telegram. Escalating this incident to you now."
+When a diagnostic tool execution completes successfully, speak a single, clean completion sentence and then stop prompting.
 Do NOT attempt to execute or authorize any command not present in the verified runbooks below.
 
 INCIDENT ID: {ico.incident_id}
@@ -218,7 +228,7 @@ RUNBOOKS:
         Dispatches an async HTTP POST notification to the console server notifying it of fault resolution.
         Uses a strict timeout and fails gracefully so voice streaming is never interrupted.
         """
-        url = console_url or getattr(settings, "console_url", "http://localhost:8000")
+        url = str(console_url or getattr(settings, "console_url", "http://localhost:8000"))
         endpoint = f"{url.rstrip('/')}/api/faults/resolve"
         payload = {
             "incident_id": self.ico.incident_id,
@@ -234,10 +244,35 @@ RUNBOOKS:
             logger.warning(f"Failed to notify console of resolution at {endpoint}: {exc}")
             return False
 
+    async def notify_console_escalation(
+        self, command: str, console_url: str | None = None
+    ) -> bool:
+        """
+        Dispatches an async HTTP POST notification to the console server notifying it of fault escalation to human.
+        Uses a strict timeout and fails gracefully so voice streaming is never interrupted.
+        """
+        url = str(console_url or getattr(settings, "console_url", "http://localhost:8000"))
+        endpoint = f"{url.rstrip('/')}/api/faults/escalate"
+        payload = {
+            "incident_id": self.ico.incident_id,
+            "command": command,
+            "status": "PROBLEM_ESCALATED_TO_HUMAN",
+            "service": self.ico.candidate_runbooks[0].service if self.ico.candidate_runbooks else "unknown",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                resp = await client.post(endpoint, json=payload)
+                return resp.status_code == 200
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Failed to notify console of escalation at {endpoint}: {exc}")
+            return False
+
     async def execute_tool(self, command: str) -> str:
         """
         Validates the proposed command against the Grounding Contract and deterministic
         policy engine before dispatching and signaling Temporal.
+        Enforces Hybrid Action Policy: Tier 1 executes automatically; Tier 2 blocks auto-execution,
+        dispatches to Telegram, and escalates to human.
         """
         # 1. Grounding Validation against candidate runbooks
         is_valid, validation_msg = GroundingValidator.validate_action(command, self.ico)
@@ -254,14 +289,53 @@ RUNBOOKS:
                 "Spoken confirmation ('confirm', 'go ahead', 'yeah sure') is required before execution."
             )
 
-        # Find matching source chunk
+        # Find matching source chunk and extract manual steps
         source_chunk = "UNKNOWN"
+        manual_steps: list[str] = []
         for rb in self.ico.candidate_runbooks:
             if command.strip() in rb.content:
                 source_chunk = rb.chunk_id
+                manual_steps = extract_manual_steps_from_runbook(rb.content)
                 break
 
-        action_payload: dict[str, Any] = {
+        if tier == ActionTier.TIER_2_MUTATING:
+            # Hybrid Action Policy: Block auto-execution on server/cloud,
+            # dispatch problem details + exact command + manual steps to Telegram,
+            # and transition incident to PROBLEM_ESCALATED_TO_HUMAN.
+            telegram_res = await dispatch_telegram_escalation(
+                incident_id=self.ico.incident_id,
+                problem_summary=self.ico.hypothesis.text or self.ico.headline,
+                impact=f"{self.ico.impact} (Severity: {self.ico.severity})",
+                exact_command=command,
+                manual_steps=manual_steps,
+            )
+
+            action_payload: dict[str, Any] = {
+                "incident_id": self.ico.incident_id,
+                "command": command,
+                "tier": tier.value,
+                "status": "PROBLEM_ESCALATED_TO_HUMAN",
+                "source_chunk": source_chunk,
+                "dispatched_at": datetime.now(UTC).isoformat(),
+                "human_utterance": "Spoken assent given",
+                "telegram": telegram_res,
+            }
+            self.dispatched_actions.append(action_payload)
+            self.status = "PROBLEM_ESCALATED_TO_HUMAN"
+
+            dispatcher = self.temporal_dispatcher or default_signal_temporal
+            try:
+                await dispatcher(action_payload)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"Error signaling Temporal for escalation: {exc}")
+
+            return (
+                f"ESCALATED: Command '{command}' ({tier.value}) blocked by Hybrid Policy. "
+                "Dispatched to Telegram with status PROBLEM_ESCALATED_TO_HUMAN."
+            )
+
+        # Tier 1 Read-Only: Permitted for automated execution
+        action_payload = {
             "incident_id": self.ico.incident_id,
             "command": command,
             "tier": tier.value,
@@ -278,7 +352,7 @@ RUNBOOKS:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"Error signaling Temporal for action: {exc}")
 
-        return f"SUCCESS: Command '{command}' ({tier.value}) validated and dispatched to Temporal."
+        return f"SUCCESS: Command '{command}' ({tier.value}) validated and executed automatically."
 
     def create_livekit_tool(self) -> Any:
         """
@@ -298,6 +372,24 @@ RUNBOOKS:
             """
             session_ref.is_confirmed = True
             raw_result = await session_ref.execute_tool(command)
+            tier = classify_command(command)
+
+            if tier == ActionTier.TIER_2_MUTATING and "ESCALATED" in raw_result:
+                try:
+                    await session_ref.notify_console_escalation(command)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"Error notifying console of escalation: {exc}")
+
+                return json.dumps({
+                    "status": "PROBLEM_ESCALATED_TO_HUMAN",
+                    "command": command,
+                    "message": (
+                        "Understood. I have dispatched the exact command and manual remediation "
+                        "steps to your Telegram. Escalating this incident to you now."
+                    ),
+                    "details": raw_result,
+                })
+
             if "SUCCESS" in raw_result:
                 try:
                     await session_ref.notify_console_resolution(command)
@@ -305,9 +397,13 @@ RUNBOOKS:
                     logger.warning(f"Error notifying console of resolution: {exc}")
 
                 msg = (
-                    "Remediation executed successfully. DB pool cleared."
-                    if "checkout" in command.lower() or "db" in command.lower()
-                    else "Remediation executed successfully. Fault resolved."
+                    "Diagnostic command executed successfully."
+                    if tier == ActionTier.TIER_1_READ_ONLY
+                    else (
+                        "Remediation executed successfully. DB pool cleared."
+                        if "checkout" in command.lower() or "db" in command.lower()
+                        else "Remediation executed successfully. Fault resolved."
+                    )
                 )
                 return json.dumps({
                     "status": "SUCCESS",
@@ -425,9 +521,28 @@ RUNBOOKS:
 
         if is_match and not negative_override:
             self.is_confirmed = True
+            tier = classify_command(proposed_command)
+            if tier == ActionTier.TIER_2_MUTATING:
+                self.status = "PROBLEM_ESCALATED_TO_HUMAN"
+                dispatch_event = {
+                    "status": "PROBLEM_ESCALATED_TO_HUMAN",
+                    "command": proposed_command,
+                    "tier": tier.value,
+                    "audit": "Tier 2 mutation blocked by Hybrid Policy and escalated to human via Telegram",
+                }
+                return (
+                    True,
+                    (
+                        "Action confirmed. Dispatched exact command and manual remediation steps "
+                        "to your Telegram. Escalating this incident to you now."
+                    ),
+                    dispatch_event,
+                )
+
             dispatch_event = {
                 "status": "APPROVED",
                 "command": proposed_command,
+                "tier": tier.value,
                 "audit": "Action authorized via conversational assent and queued for dispatch",
             }
             return True, f"Action confirmed. Authorized command: {proposed_command}", dispatch_event

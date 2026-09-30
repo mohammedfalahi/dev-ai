@@ -317,6 +317,27 @@
         `;
     }
 
+    function renderFaultCardEscalated(faultId) {
+        const container = document.getElementById(`fault-container-${faultId}`);
+        if (!container) return;
+        container.innerHTML = `
+            <div class="flex items-center gap-2 w-full">
+                <div class="flex-1 bg-amber-50 border border-amber-300 text-amber-900 py-2.5 px-3.5 rounded-lg font-medium text-left flex justify-between items-center shadow-sm">
+                    <div>
+                        <div class="text-sm font-bold flex items-center gap-1.5">
+                            <span>🚨 Handed to Operator</span>
+                            <span class="text-xs bg-amber-200 text-amber-900 px-2 py-0.5 rounded font-mono font-bold">PROBLEM_ESCALATED_TO_HUMAN</span>
+                        </div>
+                        <div class="text-xs text-amber-700 font-normal">Dispatched to Telegram • Manual execution required</div>
+                    </div>
+                </div>
+                <button onclick="resetFault('${faultId}')" class="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-800 py-2.5 px-3 rounded-lg text-xs font-bold transition flex items-center gap-1 shrink-0" title="Reset State">
+                    <span>🔄 Reset State</span>
+                </button>
+            </div>
+        `;
+    }
+
     function startPolling() {
         stopPolling();
         pollInterval = setInterval(pollFaultStatus, 1500);
@@ -339,6 +360,8 @@
                 for (const [fId, fState] of Object.entries(data.fault_states)) {
                     if (fState === 'RESOLVED') {
                         renderFaultCardResolved(fId);
+                    } else if (fState === 'PROBLEM_ESCALATED_TO_HUMAN') {
+                        renderFaultCardEscalated(fId);
                     } else if (fState === 'IDLE') {
                         renderFaultCardIdle(fId);
                     }
@@ -350,6 +373,11 @@
                 confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-emerald-100 text-emerald-800 border border-emerald-400';
                 callStatusBadge.className = 'px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-semibold flex items-center gap-1.5';
                 callStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> RESOLVED';
+            } else if (data.active_fault_status === 'PROBLEM_ESCALATED_TO_HUMAN') {
+                confirmationBadge.innerText = 'ESCALATED TO TELEGRAM';
+                confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-amber-100 text-amber-900 border border-amber-400';
+                callStatusBadge.className = 'px-2.5 py-1 bg-amber-100 text-amber-900 rounded-full text-xs font-semibold flex items-center gap-1.5';
+                callStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span> PROBLEM_ESCALATED_TO_HUMAN';
             }
         } catch (e) {
             // Polling fails gracefully
@@ -492,14 +520,25 @@
 
             // Check approval status
             if (data.approved === true) {
-                confirmationBadge.innerText = 'APPROVED & DISPATCHED';
-                confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-emerald-100 text-emerald-800 border border-emerald-400';
-                callStatusBadge.className = 'px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-semibold flex items-center gap-1.5';
-                callStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> RESOLVED';
-                if (activeFaultName) {
-                    renderFaultCardResolved(activeFaultName);
+                if (data.dispatch_event && data.dispatch_event.status === 'PROBLEM_ESCALATED_TO_HUMAN') {
+                    confirmationBadge.innerText = 'ESCALATED TO TELEGRAM';
+                    confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-amber-100 text-amber-900 border border-amber-400';
+                    callStatusBadge.className = 'px-2.5 py-1 bg-amber-100 text-amber-900 rounded-full text-xs font-semibold flex items-center gap-1.5';
+                    callStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span> PROBLEM_ESCALATED_TO_HUMAN';
+                    if (activeFaultName) {
+                        renderFaultCardEscalated(activeFaultName);
+                    }
+                    appendMessage('system', `🚨 Hybrid Policy Enforcement: Tier 2 mutation blocked. Dispatched details to Telegram and escalated to human.`);
+                } else {
+                    confirmationBadge.innerText = 'APPROVED & DISPATCHED';
+                    confirmationBadge.className = 'px-2 py-0.5 rounded text-xs font-bold font-mono bg-emerald-100 text-emerald-800 border border-emerald-400';
+                    callStatusBadge.className = 'px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full text-xs font-semibold flex items-center gap-1.5';
+                    callStatusBadge.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> RESOLVED';
+                    if (activeFaultName) {
+                        renderFaultCardResolved(activeFaultName);
+                    }
+                    appendMessage('system', `🚨 Policy Authorization Confirmed: Emitted execute_action_signal to Temporal workflow.`);
                 }
-                appendMessage('system', `🚨 Policy Authorization Confirmed: Emitted execute_action_signal to Temporal workflow.`);
             }
 
             appendMessage('agent', data.response);

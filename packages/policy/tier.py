@@ -26,9 +26,24 @@ def classify_command(command: str) -> ActionTier:
 def classify_action_tier(command: str) -> int:
     """
     Classifies a proposed command into an integer policy tier:
-    - 1 for TIER_1_READ_ONLY
-    - 2 for TIER_2_MUTATING
+    - 1 for TIER_1_READ_ONLY (permitted for automated execution)
+    - 2 for TIER_2_MUTATING (flagged for human escalation)
     """
     tier = classify_command(command)
     return 2 if tier == ActionTier.TIER_2_MUTATING else 1
+
+
+def is_auto_executable(command: str) -> bool:
+    """
+    Returns True if the command is Tier 1 (Read-Only) and safe for automatic execution.
+    Returns False if the command is Tier 2 (Mutating) which must block server-side auto-execution.
+    """
+    return classify_command(command) == ActionTier.TIER_1_READ_ONLY
+
+
+def requires_human_escalation(command: str) -> bool:
+    """
+    Returns True if the command is Tier 2 (Mutating) and requires human escalation.
+    """
+    return classify_command(command) == ActionTier.TIER_2_MUTATING
 

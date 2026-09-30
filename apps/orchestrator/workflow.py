@@ -39,6 +39,28 @@ class IncidentLifecycleWorkflow:
         """
         self._actions.append(action_payload)
 
+    @workflow.signal
+    async def escalate_incident_signal(self, payload: dict[str, Any]) -> None:
+        """
+        Signal received when a Tier 2 mutating action is blocked by Hybrid Policy
+        and escalated to the human operator via Telegram.
+        Records an immutable audit log entry and marks workflow as PROBLEM_ESCALATED_TO_HUMAN.
+        """
+        self._status = "PROBLEM_ESCALATED_TO_HUMAN"
+        self._is_acknowledged = True
+        audit_entry = {
+            "incident_id": payload.get("incident_id"),
+            "command": payload.get("command"),
+            "status": "PROBLEM_ESCALATED_TO_HUMAN",
+            "tier": payload.get("tier", "TIER_2_MUTATING"),
+            "human_utterance": payload.get("human_utterance", "Spoken assent given"),
+            "dispatched_at": payload.get("dispatched_at"),
+            "source_chunk": payload.get("source_chunk"),
+            "telegram": payload.get("telegram"),
+            "audit_type": "TELEGRAM_ESCALATION_HANDOVER",
+        }
+        self._actions.append(audit_entry)
+
     @workflow.query
     def get_status(self) -> dict[str, Any]:
         """
@@ -104,5 +126,12 @@ class IncidentLifecycleWorkflow:
             )
             self._status = "ESCALATED"
             return {"result": "Escalated"}
+
+        if self._status == "PROBLEM_ESCALATED_TO_HUMAN":
+            return {
+                "result": "Problem Escalated to Human",
+                "status": "PROBLEM_ESCALATED_TO_HUMAN",
+                "actions": self._actions,
+            }
 
         return {"result": "Acknowledged"}

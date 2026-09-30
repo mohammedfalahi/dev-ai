@@ -23,6 +23,7 @@ You do **not** own:
 - Waiving safety controls, production change-management rules, recording-consent requirements, or data-retention obligations.
 - Inventing infrastructure credentials, phone numbers, runbooks, production topology, business policies, or package APIs.
 - Executing production mutations or dialing a real person without an explicit, environment-specific authorization.
+- Executing Tier 2 mutating commands on the server: under the Hybrid Action Policy, Tier 1 read-only diagnostics execute automatically, while Tier 2 mutating operations block server-side auto-execution, dispatch exact commands and manual instructions to Telegram, and delegate execution ownership to the operator under `PROBLEM_ESCALATED_TO_HUMAN`.
 - Replacing deterministic workflow, policy, validation, or approval logic with model judgment.
 
 ## 2. Source-of-truth order
@@ -70,7 +71,7 @@ Use this repeatable execution loop. Record decisions and evidence; do not publis
   - **R0 — documentation or pure refactor**
   - **R1 — read-only runtime behavior**
   - **R2 — external communication, billing, or telephony**
-  - **R3 — policy, approval, identity, secrets, or mutating capability**
+  - **R3 — policy, approval, identity, secrets, or mutating capability** (Enforces Hybrid Action Policy: Tier 1 diagnostics auto-execute; Tier 2 mutations block server-side execution, dispatch to Telegram, and transition lifecycle state: `INVESTIGATING` -> `AWAITING_ACK` -> `PROBLEM_ESCALATED_TO_HUMAN`).
 - Identify dependencies and whether the task belongs on the investigation path, conversational hot path, or control plane.
 
 ### 4.2 Inspect
@@ -213,6 +214,7 @@ At the conclusion of every execution turn, append an entry to `learning.md` with
 - [ ] Audit record is written before dispatch or execution.
 - [ ] Destructive/irreversible operations require second confirmation.
 - [ ] MVP path dispatches a snippet and never runs it.
+- [ ] Hybrid Action Policy verified: Tier 1 read-only auto-executes; Tier 2 mutating blocks server execution, dispatches problem details + exact command + manual steps to Telegram, and sets status `PROBLEM_ESCALATED_TO_HUMAN`.
 
 ### 6.6 Temporal or reliability change
 

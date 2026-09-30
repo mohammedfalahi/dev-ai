@@ -126,3 +126,59 @@ async def test_workflow_escalation_timeout(activities):
 
         status = await handle.query(IncidentLifecycleWorkflow.get_status)
         assert status["status"] == "ESCALATED"
+
+
+@pytest.mark.asyncio
+async def test_workflow_telegram_escalation_signal(activities):
+    """Test 3: Verify escalate_incident_signal sets PROBLEM_ESCALATED_TO_HUMAN and logs audit entry."""
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        Worker(
+            env.client,
+            task_queue="test-task-queue-escalate",
+            workflows=[IncidentLifecycleWorkflow],
+            activities=activities,
+        ),
+    ):
+        handle = await env.client.start_workflow(
+            IncidentLifecycleWorkflow.run,
+            {"incident_id": "INC-300"},
+            id="incident-workflow-INC-300",
+            task_queue="test-task-queue-escalate",
+        )
+
+        # Wait for workflow to reach AWAITING_ACK state
+        for _ in range(10):
+            status = await handle.query(IncidentLifecycleWorkflow.get_status)
+            if status["status"] == "AWAITING_ACK":
+                break
+            await asyncio.sleep(0.1)
+
+        assert status["status"] == "AWAITING_ACK"
+
+        # Signal workflow that Tier 2 mutation was escalated to Telegram
+        escalation_payload = {
+            "incident_id": "INC-300",
+            "command": "kubectl rollout restart deploy/checkout-api",
+            "tier": "TIER_2_MUTATING",
+            "status": "PROBLEM_ESCALATED_TO_HUMAN",
+            "human_utterance": "confirm",
+            "dispatched_at": "2026-09-30T10:00:00Z",
+            "source_chunk": "RB-1#chunk-1",
+            "telegram": {"status": "DELIVERED"},
+        }
+        await handle.signal(
+            IncidentLifecycleWorkflow.escalate_incident_signal,
+            escalation_payload,
+        )
+
+        result = await handle.result()
+        assert result["status"] == "PROBLEM_ESCALATED_TO_HUMAN"
+
+        status = await handle.query(IncidentLifecycleWorkflow.get_status)
+        assert status["status"] == "PROBLEM_ESCALATED_TO_HUMAN"
+        assert len(status["actions"]) == 1
+        audit = status["actions"][0]
+        assert audit["status"] == "PROBLEM_ESCALATED_TO_HUMAN"
+        assert audit["command"] == "kubectl rollout restart deploy/checkout-api"
+        assert audit["audit_type"] == "TELEGRAM_ESCALATION_HANDOVER"

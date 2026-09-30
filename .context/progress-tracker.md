@@ -34,7 +34,7 @@ Allowed states: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `PASS`, `FAIL`, `DEFERR
 | 6 | Offline conversational loop | PASS | Grounded p50 ≤800 ms; p95 <1 s in controlled test | tests/test_voice_agent.py |
 | 7 | SIP and controlled telephony | PASS | Allowlisted call; voicemail not acknowledged; kill switch passes | tests/test_telephony.py |
 | 8 | Integrate Investigator and Voice | PASS | Caller understands grounded brief; latency gate holds | tests/test_voice_agent.py |
-| 9 | Spoken approval, dispatch, and recovery watch | NOT STARTED | Complete signed record for every dispatch; no execution | Pending |
+| 9 | Spoken approval, dispatch, and recovery watch | IN PROGRESS | Complete signed record for every dispatch; no execution | tests/test_telegram.py, tests/test_voice_agent.py |
 | 10 | Escalation and night-survival hardening | NOT STARTED | Escalation survives failures within caps | Pending |
 | 11 | Evaluation, compliance, and pilot hardening | NOT STARTED | All release gates pass; pilot and rollback approved | Pending |
 
@@ -410,6 +410,15 @@ Use this format for later entries:
 - Risks: On Twilio trial accounts, destination numbers must be verified in the Twilio console and trial disclaimers precede the spoken message.
 - Next: Advance to Week 9 (Spoken approval, dispatch, and recovery watch).
 
+### 2026-09-30 — Hybrid Action Policy & Telegram Escalation Handover (Milestone 32) Completed
+
+- State: PASS
+- Changes: `packages/core/config.py`, `packages/core/telegram.py`, `packages/policy/tier.py`, `apps/voice/agent.py`, `apps/orchestrator/workflow.py`, `apps/console/app.py`, `apps/console/static/index.html`, `.context/architecture.md`, `AGENTS.md`, `.context/progress-tracker.md`, `tests/test_telegram.py`, `tests/test_policy_and_grounding.py`, `tests/test_console.py`, `tests/test_orchestrator.py`, `tests/test_voice_agent.py`
+- Verification: `uv run pytest tests/test_telegram.py tests/test_voice_agent.py tests/test_console.py tests/test_orchestrator.py tests/test_policy_and_grounding.py -v` (40/40 passed), `uv run ruff check packages/ apps/ tests/` (clean), `uv run mypy packages/ apps/ tests/` (clean).
+- Metrics: Enforced deterministic Hybrid Action Policy. Tier 1 read-only diagnostics execute automatically on server. Tier 2 mutating actions block server auto-execution upon spoken assent, trigger `dispatch_telegram_escalation` (formatting incident ID, problem summary, severity/impact, bash command fences, and ordered manual steps to Telegram Bot API), emit `escalate_incident_signal` with immutable audit entry to Temporal workflow, transition workflow and console state to `PROBLEM_ESCALATED_TO_HUMAN`, and provide natural spoken feedback to operator: *"Understood. I have dispatched the exact command and manual remediation steps to your Telegram. Escalating this incident to you now."* Console renders amber badges and state cards for escalated incidents.
+- Risks: In offline/unconfigured environments, Telegram dispatcher falls back gracefully to logged mock dispatch (`DISPATCHED_MOCK`) without stalling audio streams or failing test suites.
+- Next: Complete recovery watch and post-remediation telemetry checks for Week 9.
+
 ## 11. Current next action
 
-Advance to Week 9 (Spoken approval, dispatch, and recovery watch).
+Advance to recovery watch and post-remediation telemetry checks for Week 9.

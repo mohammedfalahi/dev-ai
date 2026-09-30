@@ -1,4 +1,5 @@
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -23,9 +24,16 @@ class DialRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
     incident_id: str = Field(default="INC-MANUAL", description="ID of the incident triggering the call")
-    destination: str = Field(..., alias="to_phone_number", description="Target phone number in E.164 format")
+    destination: str = Field(default="", description="Target phone number in E.164 format")
     caller_id: str | None = Field(default=None, description="Outbound CLI/caller ID number")
     initial_brief: str | None = Field(default=None, description="Initial spoken brief or message")
+    to_phone_number: str | None = Field(default=None, description="Alias for destination")
+
+    def model_post_init(self, context: Any, /) -> None:
+        if not self.destination and self.to_phone_number:
+            self.destination = self.to_phone_number
+        elif self.destination and not self.to_phone_number:
+            self.to_phone_number = self.destination
 
 
 class CallOutcomeEvent(BaseModel):

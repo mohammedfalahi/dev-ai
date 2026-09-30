@@ -80,6 +80,13 @@ class FaultResolveRequest(BaseModel):
     status: str = "RESOLVED"
 
 
+class FaultEscalateRequest(BaseModel):
+    fault_id: str | None = None
+    incident_id: str | None = None
+    command: str | None = None
+    status: str = "PROBLEM_ESCALATED_TO_HUMAN"
+
+
 class FaultResetRequest(BaseModel):
     fault_id: str | None = None
 
@@ -123,6 +130,33 @@ async def resolve_fault_endpoint(
 
     return {
         "status": "RESOLVED",
+        "fault_id": target_fault,
+        "active_fault": active_fault,
+        "active_fault_status": active_fault_status,
+        "fault_states": fault_states,
+    }
+
+
+@app.post("/api/faults/escalate")
+async def escalate_fault_endpoint(
+    req: FaultEscalateRequest | None = None,
+) -> dict[str, Any]:
+    global active_fault_status
+
+    active_fault_status = "PROBLEM_ESCALATED_TO_HUMAN"
+    target_fault = (
+        (req.fault_id if req and req.fault_id else None)
+        or active_fault
+        or "db-pool-exhaustion"
+    )
+    fault_states[target_fault] = "PROBLEM_ESCALATED_TO_HUMAN"
+
+    if active_session:
+        active_session.is_confirmed = True
+        active_session.status = "PROBLEM_ESCALATED_TO_HUMAN"
+
+    return {
+        "status": "PROBLEM_ESCALATED_TO_HUMAN",
         "fault_id": target_fault,
         "active_fault": active_fault,
         "active_fault_status": active_fault_status,
@@ -262,6 +296,11 @@ async def drill_status(workflow_id: str) -> DrillStatusResponse:
     drill_status_str = "NOTIFYING"
     if active_fault_status == "RESOLVED":
         drill_status_str = "RESOLVED"
+    elif (
+        active_fault_status == "PROBLEM_ESCALATED_TO_HUMAN"
+        or getattr(active_session, "status", "") == "PROBLEM_ESCALATED_TO_HUMAN"
+    ):
+        drill_status_str = "PROBLEM_ESCALATED_TO_HUMAN"
     elif active_session.is_confirmed:
         drill_status_str = "DISPATCHED"
 
@@ -329,9 +368,14 @@ async def chat_endpoint(req: ChatRequest) -> ChatResponse:
             dispatch_evt = dispatch
             active_proposed_command = None
             active_tier = None
-            active_fault_status = "RESOLVED"
-            if active_fault:
-                fault_states[active_fault] = "RESOLVED"
+            if dispatch_evt and dispatch_evt.get("status") == "PROBLEM_ESCALATED_TO_HUMAN":
+                active_fault_status = "PROBLEM_ESCALATED_TO_HUMAN"
+                if active_fault:
+                    fault_states[active_fault] = "PROBLEM_ESCALATED_TO_HUMAN"
+            else:
+                active_fault_status = "RESOLVED"
+                if active_fault:
+                    fault_states[active_fault] = "RESOLVED"
             latency_ms = (time.perf_counter() - start_time) * 1000
             return ChatResponse(
                 response=msg,
